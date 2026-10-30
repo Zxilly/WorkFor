@@ -1,0 +1,14 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/WorkFor.Contracts/WorkFor.Contracts.csproj" />
+    <Project Path="src/WorkFor.Core/WorkFor.Core.csproj" />
+    <Project Path="src/WorkFor.Host/WorkFor.Host.csproj" />
+    <Project Path="src/WorkFor.ScriptHost/WorkFor.ScriptHost.csproj" />
+    <Project Path="src/WorkFor.UI/WorkFor.UI.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/WorkFor.Core.Tests/WorkFor.Core.Tests.csproj" />
+    <Project Path="tests/WorkFor.Host.Tests/WorkFor.Host.Tests.csproj" />
+    <Project Path="tests/WorkFor.ScriptHost.Tests/WorkFor.ScriptHost.Tests.csproj" />
+  </Folder>
+</Solution>

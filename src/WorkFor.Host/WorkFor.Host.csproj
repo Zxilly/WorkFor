@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../WorkFor.Contracts/WorkFor.Contracts.csproj" />
+    <ProjectReference Include="../WorkFor.Core/WorkFor.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="../../rules/builtin.hourly/index.mjs" Link="rules/hourly.mjs" CopyToOutputDirectory="PreserveNewest" Condition="Exists('../../rules/builtin.hourly/index.mjs')" />
+  </ItemGroup>
+</Project>
