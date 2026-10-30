@@ -1,0 +1,88 @@
+{
+  "attempts": [
+    {
+      "bootstrap": {
+        "layoutAttached": false,
+        "protocolVersion": 1,
+        "state": "Bootstrapped",
+        "type": "native.state"
+      },
+      "detach": {
+        "layoutAttached": false,
+        "protocolVersion": 1,
+        "state": "Dormant",
+        "type": "native.state"
+      },
+      "hello": {
+        "capabilities": [
+          "probeBootstrap",
+          "logicalDetach"
+        ],
+        "moduleVersion": "0.1.0-p0",
+        "nativeAbiVersion": 1,
+        "pinnedUntilProcessExit": true,
+        "protocolVersion": 1,
+        "type": "native.hello"
+      },
+      "layoutRejected": {
+        "code": "LAYOUT_ADAPTER_NOT_CONNECTED",
+        "layoutAttached": false,
+        "protocolVersion": 1,
+        "type": "native.error"
+      }
+    },
+    {
+      "bootstrap": {
+        "layoutAttached": false,
+        "protocolVersion": 1,
+        "state": "Bootstrapped",
+        "type": "native.state"
+      },
+      "detach": {
+        "layoutAttached": false,
+        "protocolVersion": 1,
+        "state": "Dormant",
+        "type": "native.state"
+      },
+      "hello": {
+        "capabilities": [
+          "probeBootstrap",
+          "logicalDetach"
+        ],
+        "moduleVersion": "0.1.0-p0",
+        "nativeAbiVersion": 1,
+        "pinnedUntilProcessExit": true,
+        "protocolVersion": 1,
+        "type": "native.hello"
+      },
+      "layoutRejected": {
+        "code": "LAYOUT_ADAPTER_NOT_CONNECTED",
+        "layoutAttached": false,
+        "protocolVersion": 1,
+        "type": "native.error"
+      }
+    }
+  ],
+  "layoutAttached": false,
+  "passed": true,
+  "productionExplorerHooked": false,
+  "protocolTests": {
+    "deepJsonRejected": true,
+    "duplicatePropertyRejected": true,
+    "fragmentedFrame": true,
+    "malformedJsonRejected": true,
+    "nonObjectRejected": true,
+    "oversizedHeaderRejected": true,
+    "partialHeaderRejected": true,
+    "readDeadlineEnforced": true
+  },
+  "target": {
+    "imagePath": "D:\\Upstream\\workfor\\out\\native-agent\\WorkFor.NativeBridge.exe",
+    "integrityLevel": 12288,
+    "nativeX64": true,
+    "sessionId": 1,
+    "windowClass": "WorkFor.ProbeTarget.v1"
+  },
+  "type": "probe.result",
+  "wrongIdentityRejected": true
+}

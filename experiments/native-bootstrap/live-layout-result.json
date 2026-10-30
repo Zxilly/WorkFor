@@ -1,0 +1,70 @@
+{
+  "verifiedOn": "2026-10-30",
+  "platform": "Windows 11 25H2 x64 26200.9457",
+  "experiment": "Existing pinned baseline observes a timed live taskbar module",
+  "cleanupConfirmed": true,
+  "maxHostSnapshotUpdates": 12,
+  "attached": {
+    "income": {
+      "children": 3,
+      "column": 1,
+      "columns": 0,
+      "height": 37.3333,
+      "index": 3,
+      "name": "WorkForIncomeRegion",
+      "parent": 0,
+      "span": 1,
+      "type": "Windows.UI.Xaml.Controls.Grid",
+      "width": 260
+    },
+    "tray": {
+      "column": 2,
+      "height": 48,
+      "index": 2,
+      "name": "",
+      "parent": 0,
+      "span": 1,
+      "type": "SystemTray.SystemTrayFrame",
+      "width": 384.667
+    },
+    "appRepeater": {
+      "column": 0,
+      "height": 48,
+      "index": 10,
+      "name": "TaskbarFrameRepeater",
+      "parent": 4,
+      "span": 1,
+      "type": "Microsoft.UI.Xaml.Controls.ItemsRepeater",
+      "width": 1915.33
+    }
+  },
+  "detached": {
+    "incomeNodeCount": 0,
+    "tray": {
+      "column": 0,
+      "height": 48,
+      "index": 2,
+      "name": "",
+      "parent": 0,
+      "span": 1,
+      "type": "SystemTray.SystemTrayFrame",
+      "width": 384.667
+    },
+    "appRepeater": {
+      "column": 0,
+      "height": 48,
+      "index": 6,
+      "name": "TaskbarFrameRepeater",
+      "parent": 3,
+      "span": 1,
+      "type": "Microsoft.UI.Xaml.Controls.ItemsRepeater",
+      "width": 2560
+    }
+  },
+  "limits": [
+    "No overflow/crowding qualification",
+    "No multi-monitor or alternate DPI qualification",
+    "Observed pinned live module predates click activation support",
+    "Baseline observation does not provide all absolute element coordinates"
+  ]
+}

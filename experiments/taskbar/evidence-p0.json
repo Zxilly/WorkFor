@@ -1,0 +1,114 @@
+{
+  "recordedOn": "2026-10-30",
+  "experiment": "real Explorer attach / host snapshot updates / logical detach",
+  "durationSeconds": 10,
+  "taskbarModuleSha256": "5dceea036939acb4e43b801a7a63530f328edad164741e6529d3d32e9b1c5866",
+  "attached": [
+    {
+      "name": "",
+      "type": "Windows.UI.Xaml.Controls.Grid",
+      "width": 2560,
+      "height": 48,
+      "column": 0,
+      "span": 1,
+      "columns": 3,
+      "children": 3
+    },
+    {
+      "name": "TaskbarFrame",
+      "type": "Taskbar.TaskbarFrame",
+      "width": 2560,
+      "height": 48,
+      "column": 0,
+      "span": 3
+    },
+    {
+      "name": "",
+      "type": "SystemTray.SystemTrayFrame",
+      "width": 384.667,
+      "height": 48,
+      "column": 2,
+      "span": 1
+    },
+    {
+      "name": "WorkForIncomeRegion",
+      "type": "Windows.UI.Xaml.Controls.Grid",
+      "width": 260,
+      "height": 37.3333,
+      "column": 1,
+      "span": 1,
+      "columns": 0,
+      "children": 3
+    },
+    {
+      "name": "BackgroundControl",
+      "type": "Taskbar.TaskbarBackground",
+      "width": 2560,
+      "height": 48,
+      "column": 0,
+      "span": 1
+    },
+    {
+      "name": "TaskbarFrameRepeater",
+      "type": "Microsoft.UI.Xaml.Controls.ItemsRepeater",
+      "width": 1915.33,
+      "height": 48,
+      "column": 0,
+      "span": 1
+    }
+  ],
+  "detached": [
+    {
+      "name": "",
+      "type": "Windows.UI.Xaml.Controls.Grid",
+      "width": 2560,
+      "height": 48,
+      "column": 0,
+      "span": 1,
+      "columns": 0,
+      "children": 2
+    },
+    {
+      "name": "TaskbarFrame",
+      "type": "Taskbar.TaskbarFrame",
+      "width": 2560,
+      "height": 48,
+      "column": 0,
+      "span": 1
+    },
+    {
+      "name": "",
+      "type": "SystemTray.SystemTrayFrame",
+      "width": 384.667,
+      "height": 48,
+      "column": 0,
+      "span": 1
+    },
+    {
+      "name": "BackgroundControl",
+      "type": "Taskbar.TaskbarBackground",
+      "width": 2560,
+      "height": 48,
+      "column": 0,
+      "span": 1
+    },
+    {
+      "name": "TaskbarFrameRepeater",
+      "type": "Microsoft.UI.Xaml.Controls.ItemsRepeater",
+      "width": 2560,
+      "height": 48,
+      "column": 0,
+      "span": 1
+    }
+  ],
+  "displayUpdates": 12,
+  "cleanupConfirmed": true,
+  "stateAfterCleanup": "Dormant",
+  "limitations": [
+    "Only the exact current taskbar module fingerprint was tested.",
+    "The tested live prototype used a Grid container; native Button activation exists in later source and passed local XAML tests only.",
+    "Crowding, overflow, all DPI/themes, multi-monitor and upgrade qualification remain pending.",
+    "PINned prototype code remains in Explorer until its natural exit; no Explorer restart was performed."
+  ],
+  "redaction": "No SID, PID, thread ID, HWND, process addresses or control generation identifiers are retained."
+}
