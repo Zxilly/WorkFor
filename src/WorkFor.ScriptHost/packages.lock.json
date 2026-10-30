@@ -2,6 +2,15 @@
   "version": 2,
   "dependencies": {
     "net10.0": {
+      "Corvus.Text.Json.Validator": {
+        "type": "Direct",
+        "requested": "[5.7.9, )",
+        "resolved": "5.7.9",
+        "contentHash": "Vb0uwjJV1Vui3o98sneNGmgjkHZxs0mgfyLyqhuQ40uI9SHe563lycLJ8K5/HhMWWKEqZGyPVtL2lQt/mhEL9w==",
+        "dependencies": {
+          "Corvus.Text.Json": "5.7.9"
+        }
+      },
       "Jint": {
         "type": "Direct",
         "requested": "[4.17.0, )",
@@ -11,38 +20,23 @@
           "Acornima": "1.7.0"
         }
       },
-      "JsonSchema.Net": {
-        "type": "Direct",
-        "requested": "[9.5.0, )",
-        "resolved": "9.5.0",
-        "contentHash": "yCohYtv0mi0oU+n3rpPBhoP/6OKkmxxwkGfprohst5DywbKoHaf9yJtFR8CYasKUUO5KfIR3gm43vsqxgT0nzA==",
-        "dependencies": {
-          "JsonPointer.Net": "7.0.3"
-        }
-      },
       "Acornima": {
         "type": "Transitive",
         "resolved": "1.7.0",
         "contentHash": "a2I4O4qkuAdB0oSaGz6/k0n/bXxMbGcLBra5dNTTVSLmTwM7uORA8ebpOrNMmDfFWOMwvuaRL6gPprRV4HTV0w=="
       },
-      "Humanizer.Core": {
+      "Corvus.Text.Json": {
         "type": "Transitive",
-        "resolved": "3.0.10",
-        "contentHash": "yZIhtw8sYuvsONzQbZxWpR60tMWYHXoo0DL6nyOqSFiU5POjBTSEyWFpTQtJEZuy+oqiYTXKXY/Mjx7KnqIQFw=="
-      },
-      "Json.More.Net": {
-        "type": "Transitive",
-        "resolved": "3.0.1",
-        "contentHash": "fRctF2J2SILYG6wqP21drmeEODmCVkVQ/b3MndDu2fT1swfySyUgq7ePCk+aENGlDcIm05fyfjh9vcuqDEfv3w=="
-      },
-      "JsonPointer.Net": {
-        "type": "Transitive",
-        "resolved": "7.0.3",
-        "contentHash": "It/10weZ3oA+BGL+Gqyw9M6wsi4Tc16vWwU+u7x6LBwty57Y3aUh7bfcn2VWAzgVTAfGuCPb5KUpsH6IFjR08A==",
+        "resolved": "5.7.9",
+        "contentHash": "ShQwHlRoLw5EoihaqsOcNcQGdBVVp48YGnz1ExqWm6nz7P63InHmBOcB7qBVRXYpwOOg9D5r7/4UsJZ2Bcg+7A==",
         "dependencies": {
-          "Humanizer.Core": "3.0.10",
-          "Json.More.Net": "3.0.1"
+          "NodaTime": "3.3.1"
         }
+      },
+      "NodaTime": {
+        "type": "Transitive",
+        "resolved": "3.3.1",
+        "contentHash": "7zkTEqmakybTTuDuifpnzl5s8MkmpAdyvoqIPIO2+M2ThF8ixavPcPt1afPfFyCI+A6t3ySujgpGq/5iWc4/RQ=="
       },
       "workfor.core": {
         "type": "Project"
