@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net10.0</TargetFramework><IsTestProject>true</IsTestProject><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../../src/WorkFor.ScriptHost/WorkFor.ScriptHost.csproj"/><PackageReference Include="Microsoft.NET.Test.Sdk"/><PackageReference Include="xunit.v3"/><PackageReference Include="xunit.runner.visualstudio" PrivateAssets="all"/></ItemGroup>
+  <ItemGroup><Content Include="../../rules/**/*.mjs" Link="rules/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest"/><Content Include="../../rules/**/*.json" Link="rules/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest"/></ItemGroup>
+</Project>

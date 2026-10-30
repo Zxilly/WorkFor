@@ -1,0 +1,22 @@
+{
+  "manifestVersion": 1,
+  "apiVersion": 1,
+  "id": "builtin.hourly",
+  "name": "按时薪计算",
+  "version": "1.0.0",
+  "entry": "index.mjs",
+  "parametersSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["hourlyRate"],
+    "properties": {
+      "hourlyRate": {
+        "type": "string",
+        "title": "时薪",
+        "pattern": "^(0|[1-9][0-9]{0,11})(\\.[0-9]{1,2})?$",
+        "default": "16.00"
+      }
+    }
+  }
+}
