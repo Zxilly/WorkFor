@@ -234,9 +234,10 @@ internal sealed class RunningHost : IAsyncDisposable
         catch { await host.DisposeAsync(); throw; }
     }
 
-    public async Task RestartAsync()
+    public async Task RestartAsync(Action<string>? beforeStart = null)
     {
         await StopProcessAsync();
+        beforeStart?.Invoke(_data);
         await StartProcessAsync();
     }
 

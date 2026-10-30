@@ -22,13 +22,47 @@ internal static class Program
         try
         {
             var directory = Option(args, "--data-dir") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WorkFor");
+            directory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory));
             var scriptHost = Option(args, "--script-host") ?? Path.Combine(AppContext.BaseDirectory, "WorkFor.ScriptHost.exe");
             if (!File.Exists(scriptHost)) throw new FileNotFoundException("找不到脚本进程，请使用完整构建目录或 --script-host 指定路径。", scriptHost);
             var ui = Option(args, "--ui") ?? Path.Combine(AppContext.BaseDirectory, "WorkFor.UI.exe");
-            var config = new ConfigurationStore(directory);
+            using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+            var once = args.Contains("--once");
+            var mutexName = $"Local\\WorkFor.Host-{identity.User!.Value}-{Process.GetCurrentProcess().SessionId}";
+            var first = true;
+            using var mutex = once ? null : new Mutex(false, mutexName, out first);
+            if (!once && !first) { Console.Error.WriteLine("当前会话已在运行 WorkFor.Host。"); return 2; }
+            var configurationKey = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(directory.ToUpperInvariant())))[..24];
+            using var configurationMutex = new Mutex(false, $"Global\\WorkFor.Config-{identity.User!.Value}-{configurationKey}", out var ownsConfiguration);
+            if (!ownsConfiguration) { Console.Error.WriteLine("该配置目录已在使用。"); return 2; }
+            var nativePath = Option(args, "--native-bridge");
+            var launcher = Option(args, "--launcher");
+            StartupRegistration? startup = null;
+            if (!once && launcher is not null) startup = new(Path.GetFullPath(launcher), ["--background"]);
+            else if (!once && string.Equals(Path.GetFileName(Environment.ProcessPath), "WorkFor.Host.exe", StringComparison.OrdinalIgnoreCase))
+            {
+                var startupArguments = new List<string> { "--data-dir", directory, "--script-host", Path.GetFullPath(scriptHost), "--ui", Path.GetFullPath(ui) };
+                if (nativePath is not null) startupArguments.AddRange(["--native-bridge", Path.GetFullPath(nativePath)]);
+                startup = new(Path.GetFullPath(Environment.ProcessPath!), startupArguments);
+            }
+            async Task<EvaluationError?> ValidatePersistedAsync(JsonObject candidate)
+            {
+                await using var validation = new ScriptProcess(scriptHost);
+                return await validation.ValidateAsync(candidate["rule"]!["manifest"]!.AsObject(),
+                    candidate["rule"]!["source"]!.GetValue<string>(), candidate["rule"]!["parameters"]!.AsObject(), stop.Token);
+            }
+            EvaluationError? ValidatePersisted(JsonObject candidate) => ValidatePersistedAsync(candidate).GetAwaiter().GetResult();
+            var config = new ConfigurationStore(directory, startup, ValidatePersisted);
+            if (!once && !args.Contains("--no-startup-sync"))
+            {
+                try { config.ReconcileStartup(); }
+                catch (ConfigException error) { Console.Error.WriteLine(error.Message); }
+            }
             await using var script = new ScriptProcess(scriptHost);
-            await using var native = new NativeSession(args.Contains("--once") ? null : Option(args, "--native-bridge"));
-            var runtime = new HostRuntime(config, script, scriptHost, ui, native);
+            var initial = config.Snapshot();
+            await using var native = new NativeSession(once ? null : nativePath, directory,
+                initial["display"]!["taskbarWidthDip"]!.GetValue<int>(), config.Revision);
+            var runtime = new HostRuntime(config, script, scriptHost, ui, native, new SnapshotStore(directory));
             if (args.Contains("--once"))
             {
                 var time = Option(args, "--at") is { } timestamp
@@ -37,10 +71,6 @@ internal static class Program
                 Console.WriteLine(snapshot.ToJsonString());
                 return snapshot["status"]?.GetValue<string>() == "fresh" ? 0 : 1;
             }
-            using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
-            var mutexName = $"Local\\WorkFor.Host-{identity.User!.Value}-{Process.GetCurrentProcess().SessionId}";
-            using var mutex = new Mutex(true, mutexName, out var first);
-            if (!first) { Console.Error.WriteLine("当前会话已在运行 WorkFor.Host。"); return 2; }
             async Task<JsonObject> HandleControl(string type, JsonObject payload, CancellationToken token)
             {
                 if (type == "host.shutdown")
@@ -53,10 +83,11 @@ internal static class Program
             await using var hub = new PipeHub(HandleControl, runtime.OpenDetails);
             runtime.SnapshotPublished += hub.Publish;
             hub.Start();
+            runtime.PublishPersisted();
             native.Start();
             Console.Error.WriteLine("WorkFor 计算宿主已启动；每秒根据绝对时刻重新计算。Ctrl+C 退出。");
             try { await runtime.RunAsync(stop.Token); }
-            finally { await native.DisposeAsync(); }
+            finally { await native.DisposeAsync(); await runtime.FlushSnapshotAsync(); }
             return 0;
         }
         catch (OperationCanceledException) when (stop.IsCancellationRequested) { return 0; }
@@ -75,11 +106,14 @@ internal static class Program
     }
 }
 
-internal sealed class HostRuntime(ConfigurationStore configuration, ScriptProcess script, string scriptHost, string ui, NativeSession native)
+internal sealed class HostRuntime(ConfigurationStore configuration, ScriptProcess script, string scriptHost, string ui, NativeSession native, SnapshotStore snapshots)
 {
     private readonly string _generation = Guid.NewGuid().ToString();
     private long _sequence;
-    private JsonObject? _lastSuccess;
+    private JsonObject? _lastSuccess = snapshots.LoadStale(DateTimeOffset.UtcNow, configuration.Revision, configuration.Snapshot()["rule"]!["contentHash"]!.GetValue<string>());
+    private DateTimeOffset _lastSaved;
+    private long _lastSavedRevision;
+    private string? _snapshotNotice;
     private EvaluationError? _lastError;
     private long _failureRevision = -1;
     private int _failureCount;
@@ -88,6 +122,22 @@ internal sealed class HostRuntime(ConfigurationStore configuration, ScriptProces
     private readonly SemaphoreSlim _evaluate = new(1);
     private readonly SemaphoreSlim _previews = new(2);
     public event Action<JsonObject>? SnapshotPublished;
+
+    public void PublishPersisted()
+    {
+        if (_lastSuccess is null) return;
+        var value = (JsonObject)_lastSuccess.DeepClone();
+        value["generation"] = _generation; value["sequence"] = 0;
+        SnapshotPublished?.Invoke(value);
+    }
+
+    public async Task FlushSnapshotAsync()
+    {
+        if (_lastSuccess?["status"]?.GetValue<string>() != "fresh") return;
+        try { await snapshots.SaveAsync(_lastSuccess, CancellationToken.None); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidDataException)
+        { _snapshotNotice = "未能保存最近计算结果；下次启动会按绝对时间重新计算。"; }
+    }
 
     public async Task RunAsync(CancellationToken cancellationToken)
     {
@@ -118,6 +168,7 @@ internal sealed class HostRuntime(ConfigurationStore configuration, ScriptProces
         {
             var config = configuration.Snapshot();
             var revision = config["revision"]!.GetValue<long>();
+            native.Configure(config["display"]!["taskbarWidthDip"]!.GetValue<int>(), revision);
             var sequence = Interlocked.Increment(ref _sequence);
             if (_failureRevision != revision)
             {
@@ -153,12 +204,18 @@ internal sealed class HostRuntime(ConfigurationStore configuration, ScriptProces
                 ["amountText"] = amount, ["amountMinor"] = result.AmountMinor, ["currency"] = result.Currency,
                 ["status"] = "fresh", ["statusText"] = "实时更新", ["accessibleText"] = $"收入 {amount}，实时更新",
                 ["rateText"] = result.RatePerHourMinor is { } rate ? MoneyFormatter.Format(rate, context.Currency, locale) + " / 小时" : "",
+                ["rateLabel"] = result.RatePerHourMinor is null ? "" : config["rule"]!["id"]!.GetValue<string>() == "builtin.monthly" ? "折算时薪" : "当前时薪",
                 ["scheduledElapsedText"] = $"{(int)duration.TotalHours} 小时 {duration.Minutes} 分钟 {duration.Seconds} 秒",
                 ["note"] = result.Note ?? "", ["metrics"] = JsonSerializer.SerializeToNode(result.Metrics, WorkForJson.Options),
                 ["taskbarState"] = native.Snapshot()["state"]?.DeepClone(),
                 ["nativeState"] = native.Snapshot()
             };
             _lastSuccess = (JsonObject)snapshot.DeepClone();
+            if (_lastSavedRevision != revision || now - _lastSaved >= TimeSpan.FromSeconds(30))
+            {
+                await FlushSnapshotAsync();
+                _lastSaved = now; _lastSavedRevision = revision;
+            }
             return snapshot;
         }
         catch (Exception error) when (error is ArgumentException or InvalidOperationException
@@ -180,32 +237,47 @@ internal sealed class HostRuntime(ConfigurationStore configuration, ScriptProces
 
     private JsonObject FailureSnapshot(JsonObject config, DateTimeOffset now, long sequence, EvaluationError error)
     {
-        var snapshot = _lastSuccess is null ? new JsonObject { ["amountText"] = "--", ["title"] = "今日收入" }
+        var snapshot = _lastSuccess is null ? new JsonObject { ["amountText"] = "--",
+                ["title"] = config["display"]!["period"]!.GetValue<string>() == "month" ? "本月收入" : "今日收入",
+                ["currency"] = config["display"]!["currency"]!.DeepClone() }
             : (JsonObject)_lastSuccess.DeepClone();
+        if (_lastSuccess is not null)
+        {
+            snapshot["lastSuccessfulRevision"] = _lastSuccess["configRevision"]?.DeepClone();
+            snapshot["lastSuccessfulAtMs"] = _lastSuccess["evaluatedAtMs"]?.DeepClone();
+        }
         snapshot["generation"] = _generation;
         snapshot["sequence"] = sequence;
         snapshot["configRevision"] = config["revision"]!.DeepClone();
         snapshot["status"] = "ruleError";
-        snapshot["statusText"] = "计算失败";
+        snapshot["statusText"] = _lastSuccess is null ? "计算失败" : "计算失败 · 显示上次结果";
         snapshot["expiresAtMs"] = now.ToUnixTimeMilliseconds();
         snapshot["error"] = JsonSerializer.SerializeToNode(error, WorkForJson.Options);
         snapshot["taskbarState"] = native.Snapshot()["state"]?.DeepClone();
+        snapshot["nativeState"] = native.Snapshot();
         return snapshot;
     }
 
     public async Task<JsonObject> ControlAsync(string type, JsonObject payload, CancellationToken cancellationToken)
     {
         if (type == "config.get") return configuration.Snapshot();
+        if (type == "rule.catalog") return BuiltinRules.Catalog();
+        if (type == "native.retry") { native.Retry(); return new() { ["retryRequested"] = true }; }
         if (type == "diagnostics.get") return new()
         {
             ["generation"] = _generation, ["sequence"] = Interlocked.Read(ref _sequence),
             ["configRevision"] = configuration.Revision, ["taskbarState"] = native.Snapshot()["state"]?.DeepClone(),
             ["nativeState"] = native.Snapshot(),
             ["lastError"] = JsonSerializer.SerializeToNode(_lastError, WorkForJson.Options),
+            ["configRecoveryNotice"] = configuration.RecoveryNotice,
+            ["configRecoveredRevision"] = configuration.RecoveredRevision,
+            ["startupNotice"] = configuration.StartupNotice,
+            ["snapshotNotice"] = _snapshotNotice ?? snapshots.Notice,
             ["nativeStatus"] = native.Snapshot()["layoutAttached"]?.GetValue<bool>() == true
                 ? "原生任务栏区域已附着。" : "原生任务栏区域未附着，请查看 nativeState。"
         };
         if (type == "ui.openDetails") { OpenDetails(payload); return new() { ["opened"] = true }; }
+        if (type == "ui.openSettings") { OpenDetails(payload, settings: true); return new() { ["opened"] = true }; }
         if (type is not ("rule.validate" or "rule.preview" or "config.activate"))
             throw new ConfigException("UNKNOWN_REQUEST", "不支持的控制消息。");
         await _previews.WaitAsync(cancellationToken);
@@ -230,6 +302,7 @@ internal sealed class HostRuntime(ConfigurationStore configuration, ScriptProces
         {
             var expected = payload["expectedRevision"]?.GetValue<long>() ?? throw new ConfigException("CONFIG_CONFLICT", "缺少 expectedRevision。");
             var committed = await configuration.ActivateAsync(candidate, expected, cancellationToken);
+            native.Configure(committed["display"]!["taskbarWidthDip"]!.GetValue<int>(), committed["revision"]!.GetValue<long>());
             _changed.Writer.TryWrite(true);
             return committed;
         }
@@ -242,10 +315,14 @@ internal sealed class HostRuntime(ConfigurationStore configuration, ScriptProces
         };
     }
 
-    public void OpenDetails(JsonObject payload)
+    public void OpenDetails(JsonObject payload) => OpenDetails(payload, settings: false);
+
+    private void OpenDetails(JsonObject payload, bool settings)
     {
         if (!File.Exists(ui)) return;
+        GrantExistingUiForeground();
         var info = new ProcessStartInfo(Path.GetFullPath(ui)) { UseShellExecute = false, WorkingDirectory = AppContext.BaseDirectory };
+        if (settings) info.ArgumentList.Add("--settings");
         if (payload["anchorRect"] is JsonObject anchor)
         {
             try
@@ -266,6 +343,27 @@ internal sealed class HostRuntime(ConfigurationStore configuration, ScriptProces
         var started = Process.Start(info);
         if (started is not null) AllowSetForegroundWindow((uint)started.Id);
     }
+
+    private void GrantExistingUiForeground()
+    {
+        try
+        {
+            using var pipe = new System.IO.Pipes.NamedPipeClientStream(".", PipeHub.Name("ui"),
+                System.IO.Pipes.PipeDirection.InOut, System.IO.Pipes.PipeOptions.CurrentUserOnly);
+            pipe.Connect(100);
+            if (!GetNamedPipeServerProcessId(pipe.SafePipeHandle.DangerousGetHandle(), out var pid)) return;
+            using var process = Process.GetProcessById(checked((int)pid));
+            if (process.SessionId == Process.GetCurrentProcess().SessionId &&
+                string.Equals(Path.GetFullPath(process.MainModule!.FileName), Path.GetFullPath(ui), StringComparison.OrdinalIgnoreCase))
+                AllowSetForegroundWindow(pid);
+        }
+        catch (Exception error) when (error is IOException or TimeoutException or InvalidOperationException
+            or System.ComponentModel.Win32Exception or ArgumentException) { }
+    }
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool GetNamedPipeServerProcessId(IntPtr pipe, out uint processId);
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]

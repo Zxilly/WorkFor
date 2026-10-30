@@ -8,6 +8,12 @@
     <ProjectReference Include="../WorkFor.Core/WorkFor.Core.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <EmbeddedResource Include="../../rules/builtin.hourly/index.mjs" LogicalName="WorkFor.Builtin.hourly.Source" />
+    <EmbeddedResource Include="../../rules/builtin.hourly/rule.json" LogicalName="WorkFor.Builtin.hourly.Manifest" />
+    <EmbeddedResource Include="../../rules/builtin.monthly/index.mjs" LogicalName="WorkFor.Builtin.monthly.Source" />
+    <EmbeddedResource Include="../../rules/builtin.monthly/rule.json" LogicalName="WorkFor.Builtin.monthly.Manifest" />
+  </ItemGroup>
+  <ItemGroup>
     <Content Include="../../rules/builtin.hourly/index.mjs" Link="rules/hourly.mjs" CopyToOutputDirectory="PreserveNewest" Condition="Exists('../../rules/builtin.hourly/index.mjs')" />
   </ItemGroup>
 </Project>

@@ -8,32 +8,71 @@ using WorkFor.Contracts;
 
 namespace WorkFor.Host;
 
-internal sealed class ConfigurationStore
+internal sealed partial class ConfigurationStore
 {
+    public const int CurrentSchemaVersion = 2;
+    private const long MaximumRevision = 9_007_199_254_740_990;
     private readonly string _directory;
+    private readonly StartupRegistration? _startup;
+    private readonly Func<JsonObject, EvaluationError?>? _persistedValidator;
     private readonly SemaphoreSlim _commit = new(1);
     private JsonObject _current;
     private long _revision;
 
-    public ConfigurationStore(string directory)
+    public string? RecoveryNotice { get; private set; }
+    public long? RecoveredRevision { get; private set; }
+    public string? StartupNotice { get; private set; }
+
+    public ConfigurationStore(string directory, StartupRegistration? startup = null, Func<JsonObject, EvaluationError?>? persistedValidator = null)
     {
         _directory = Path.GetFullPath(directory);
+        _startup = startup;
+        _persistedValidator = persistedValidator;
         Directory.CreateDirectory(_directory);
         var file = Path.Combine(_directory, "settings.json");
+        var backup = Path.Combine(_directory, "settings.backup.json");
         if (File.Exists(file))
         {
-            // A corrupt configuration is an error, never silently replace a salary.
-            _current = Read(file);
+            try
+            {
+                _current = ReadPersisted(file, out var migrated);
+                if (migrated)
+                {
+                    try { AtomicJsonFile.WriteAsync(file, _current, backup, CancellationToken.None).GetAwaiter().GetResult(); }
+                    catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+                    { throw new ConfigException("CONFIG_MIGRATION_FAILED", "配置可读取，但格式迁移无法保存；未回退或重置收入参数。"); }
+                    RecoveryNotice = "配置已从格式 v1 迁移到 v2；收入参数、规则源文和业务版本均保留。";
+                }
+            }
+            catch (ConfigException error) when (error.Code is "SCHEMA_VERSION_UNSUPPORTED" or "CONFIG_MIGRATION_FAILED" or "CONFIG_VALIDATION_UNAVAILABLE") { throw; }
+            catch (Exception error) when (Recoverable(error)) { _current = Recover(file, backup); }
         }
-        else _current = Defaults();
-        if (_current["rule"] is JsonObject existing && existing["manifest"] is null)
-            existing["manifest"] = DefaultManifest();
-        NormalizeAndValidate(_current);
+        else if (File.Exists(backup)) _current = Recover(file, backup);
+        else
+        {
+            _current = Defaults();
+            _current["rule"]!["manifest"] = DefaultManifest();
+            NormalizeAndValidate(_current);
+            ValidatePersisted(_current);
+        }
         _revision = _current["revision"]!.GetValue<long>();
     }
 
     public long Revision => Interlocked.Read(ref _revision);
     public JsonObject Snapshot() => (JsonObject)Volatile.Read(ref _current).DeepClone();
+
+    /// <summary>Call explicitly after owning the Host mutex. Construction never touches HKCU.</summary>
+    public void ReconcileStartup()
+    {
+        var enabled = _current["startWithWindows"]!.GetValue<bool>();
+        if (_startup is null)
+        {
+            if (enabled) throw new ConfigException("STARTUP_NOT_AVAILABLE", "配置要求登录启动，但没有可信启动入口。");
+            return;
+        }
+        try { _startup.SetEnabled(enabled); StartupNotice = null; }
+        catch (ConfigException error) { StartupNotice = error.Message; throw; }
+    }
 
     public JsonObject Candidate(JsonObject patch)
     {
@@ -52,8 +91,8 @@ internal sealed class ConfigurationStore
             ((JsonObject)candidate["rule"]!)["source"] = source.DeepClone();
         if (patch["manifest"] is JsonObject manifest)
             ((JsonObject)candidate["rule"]!)["manifest"] = manifest.DeepClone();
-        if (patch["startWithWindows"] is not null)
-            candidate["startWithWindows"] = patch["startWithWindows"]!.DeepClone();
+        if (patch.ContainsKey("startWithWindows"))
+            candidate["startWithWindows"] = patch["startWithWindows"]?.DeepClone();
         NormalizeAndValidate(candidate);
         return candidate;
     }
@@ -64,33 +103,53 @@ internal sealed class ConfigurationStore
         try
         {
             if (Revision != expectedRevision) throw new ConfigException("CONFIG_CONFLICT", "配置已被更新，请重新读取。");
+            if (expectedRevision >= MaximumRevision) throw new ConfigException("CONFIG_INVALID", "配置版本超过安全整数范围。");
             candidate = (JsonObject)candidate.DeepClone();
-            candidate["revision"] = checked(expectedRevision + 1);
+            candidate["revision"] = expectedRevision + 1;
             NormalizeAndValidate(candidate);
             var source = candidate["rule"]!["source"]!.GetValue<string>();
             var hash = candidate["rule"]!["contentHash"]!.GetValue<string>()[7..];
             var ruleDirectory = Path.Combine(_directory, "rules", hash);
             Directory.CreateDirectory(ruleDirectory);
             var sourceFile = Path.Combine(ruleDirectory, "index.mjs");
-            if (!File.Exists(sourceFile)) await File.WriteAllTextAsync(sourceFile, source, new UTF8Encoding(false), cancellationToken);
-            var temporary = Path.Combine(_directory, $"settings.{Guid.NewGuid():N}.tmp");
+            if (File.Exists(sourceFile))
+            {
+                if (new FileInfo(sourceFile).Length > 65536 || await File.ReadAllTextAsync(sourceFile, cancellationToken) != source)
+                    throw new ConfigException("RULE_ARCHIVE_CORRUPT", "相同哈希的规则归档内容不匹配，未应用配置。");
+            }
+            else await File.WriteAllTextAsync(sourceFile, source, new UTF8Encoding(false), cancellationToken);
+            var startupChanged = candidate["startWithWindows"]!.GetValue<bool>() != _current["startWithWindows"]!.GetValue<bool>();
+            string? previousStartup = null;
+            var startupTouched = false;
             try
             {
-                var bytes = JsonSerializer.SerializeToUtf8Bytes(candidate, new JsonSerializerOptions { WriteIndented = true });
-                await using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None,
-                    4096, FileOptions.Asynchronous | FileOptions.WriteThrough))
+                if (startupChanged)
                 {
-                    await stream.WriteAsync(bytes, cancellationToken);
-                    stream.Flush(flushToDisk: true);
+                    if (_startup is null) throw new ConfigException("STARTUP_NOT_AVAILABLE", "没有可信启动入口，未更改登录启动项。");
+                    try { previousStartup = _startup.Capture(); }
+                    catch (Exception error) when (Recoverable(error)) { throw new ConfigException("STARTUP_REGISTRATION_FAILED", "无法读取登录启动项，未应用配置。"); }
+                    startupTouched = true;
+                    _startup.SetEnabled(candidate["startWithWindows"]!.GetValue<bool>());
                 }
-                var file = Path.Combine(_directory, "settings.json");
-                if (File.Exists(file)) File.Replace(temporary, file, Path.Combine(_directory, "settings.backup.json"));
-                else File.Move(temporary, file);
-                Volatile.Write(ref _current, candidate);
-                Interlocked.Exchange(ref _revision, expectedRevision + 1);
-                return Snapshot();
+                await AtomicJsonFile.WriteAsync(Path.Combine(_directory, "settings.json"), candidate,
+                    Path.Combine(_directory, "settings.backup.json"), cancellationToken);
             }
-            finally { if (File.Exists(temporary)) File.Delete(temporary); }
+            catch (Exception error)
+            {
+                if (startupTouched)
+                    try { _startup!.Restore(previousStartup); }
+                    catch (Exception rollbackError) when (Recoverable(rollbackError))
+                    {
+                        StartupNotice = "配置未提交，但登录启动项回滚失败，请在系统设置中检查 WorkFor 登录启动状态。";
+                        throw new ConfigException("STARTUP_ROLLBACK_FAILED", StartupNotice);
+                    }
+                if (error is IOException or UnauthorizedAccessException)
+                    throw new ConfigException("CONFIG_WRITE_FAILED", "配置无法写入磁盘，未切换活动规则；登录启动项已恢复原值。");
+                throw;
+            }
+            Volatile.Write(ref _current, candidate);
+            Interlocked.Exchange(ref _revision, expectedRevision + 1);
+            return Snapshot();
         }
         finally { _commit.Release(); }
     }
@@ -131,8 +190,9 @@ internal sealed class ConfigurationStore
     private static void Validate(JsonObject value)
     {
         CheckFields(value, "schemaVersion", "revision", "display", "calendar", "rule", "startWithWindows");
-        if (value["schemaVersion"]?.GetValue<int>() != 1) throw new ConfigException("CONFIG_INVALID", "不支持的配置格式。");
-        if (value["revision"]?.GetValue<long>() < 1) throw new ConfigException("CONFIG_INVALID", "无效配置版本。");
+        if (value["schemaVersion"]?.GetValue<int>() != CurrentSchemaVersion) throw new ConfigException("SCHEMA_VERSION_UNSUPPORTED", "不支持的配置格式。");
+        if (value["revision"]?.GetValue<long>() is not (>= 1 and <= MaximumRevision)) throw new ConfigException("CONFIG_INVALID", "无效配置版本。");
+        _ = value["startWithWindows"]!.GetValue<bool>();
         var display = value["display"] as JsonObject ?? throw new ConfigException("CONFIG_INVALID", "缺少显示配置。");
         CheckFields(display, "period", "locale", "currency", "taskbarWidthDip", "monitors");
         if (display["period"]?.GetValue<string>() is not ("day" or "month")) throw new ConfigException("CONFIG_INVALID", "统计范围应为 day 或 month。");
@@ -144,20 +204,17 @@ internal sealed class ConfigurationStore
         CheckFields(rule, "id", "version", "source", "parameters", "contentHash", "manifest");
         var calendar = value["calendar"]!.AsObject();
         CheckFields(calendar, "timeZone", "weekdays", "shifts", "dateOverrides");
-        if (calendar["weekdays"]!.AsArray().Count > 7 || calendar["shifts"]!.AsArray().Count > 16)
-            throw new ConfigException("CONFIG_INVALID", "工作日或班次数量超过限制。");
-        if (calendar["dateOverrides"] is JsonObject overrides && overrides.Count > 366)
-            throw new ConfigException("CONFIG_INVALID", "日期覆盖数量超过限制。");
-        foreach (var item in calendar["shifts"]!.AsArray()) CheckFields(item!.AsObject(), "start", "end", "endNextDay");
+        ValidateCalendar(calendar);
         var source = rule["source"]?.GetValue<string>() ?? throw new ConfigException("CONFIG_INVALID", "缺少规则源文。");
         if (Encoding.UTF8.GetByteCount(source) is 0 or > 65536) throw new ConfigException("CONFIG_INVALID", "脚本大小应为1至65536字节。");
         if (rule["parameters"] is not JsonObject) throw new ConfigException("PARAMETER_INVALID", "参数必须为 JSON 对象。");
         if (rule["manifest"] is not JsonObject) throw new ConfigException("MANIFEST_INVALID", "规则必须包含清单。");
         if (Encoding.UTF8.GetByteCount(rule["parameters"]!.ToJsonString()) > 32768) throw new ConfigException("PARAMETER_INVALID", "参数超过大小限制。");
-        rule["contentHash"] = "sha256:" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(source)));
+        ContextValidator.ValidateJson(JsonSerializer.SerializeToElement(rule["parameters"]));
+        ValidateManifest(rule);
+        rule["contentHash"] = Hash(source);
+        if (Encoding.UTF8.GetByteCount(value.ToJsonString()) > 256 * 1024) throw new ConfigException("CONFIG_INVALID", "配置超过大小限制。");
         _ = Context(value, DateTimeOffset.UtcNow, "0");
-        if (value["startWithWindows"]?.GetValue<bool>() == true)
-            throw new ConfigException("STARTUP_NOT_AVAILABLE", "此开发版本尚未安装登录启动项，请保持此选项关闭。");
     }
 
     private static JsonObject Read(string file)
@@ -186,7 +243,7 @@ internal sealed class ConfigurationStore
       """)!.AsObject();
 
     private static JsonObject Defaults() => JsonNode.Parse("""
-      {"schemaVersion":1,"revision":1,
+      {"schemaVersion":2,"revision":1,
        "display":{"period":"day","locale":"zh-CN","currency":"CNY","taskbarWidthDip":260,"monitors":"primary"},
        "calendar":{"timeZone":"Asia/Shanghai","weekdays":[1,2,3,4,5],"shifts":[{"start":"09:00","end":"12:00"},{"start":"13:00","end":"18:00"}]},
        "rule":{"id":"builtin.hourly","version":"1.0.0","parameters":{"hourlyRate":"16.00"},"source":"import { money } from '@workfor/sdk';\nexport default function calculate(ctx) {\n const rate = money.fromDecimal(ctx.parameters.hourlyRate, ctx.currency.fractionDigits);\n return {apiVersion:1,currency:ctx.currency.code,amountMinor:money.ratio(rate,ctx.periods[ctx.activePeriod].elapsedScheduledMs,3600000,'floor'),ratePerHourMinor:rate};\n}"},
