@@ -1,0 +1,107 @@
+{
+  "checkedOn": "2026-10-30",
+  "timezone": "Asia/Shanghai",
+  "policy": "latest-stable-at-resolution; exact-version-and-transitive-lock",
+  "status": "design baseline; not a restored build lockfile",
+  "dotnet": {
+    "sdk": "10.0.403",
+    "runtime": "10.0.14",
+    "source": "https://builds.dotnet.microsoft.com/dotnet/release-metadata/10.0/releases.json"
+  },
+  "windhawk": {
+    "version": "1.7.3",
+    "source": "https://github.com/ramensoftware/windhawk/releases/tag/v1.7.3"
+  },
+  "packages": [
+    {
+      "id": "Microsoft.WindowsAppSDK",
+      "version": "2.6.4",
+      "source": "https://api.nuget.org/v3-flatcontainer/microsoft.windowsappsdk/index.json"
+    },
+    {
+      "id": "Jint",
+      "version": "4.17.0",
+      "source": "https://api.nuget.org/v3-flatcontainer/jint/index.json"
+    },
+    {
+      "id": "CommunityToolkit.Mvvm",
+      "version": "8.4.2",
+      "source": "https://api.nuget.org/v3-flatcontainer/communitytoolkit.mvvm/index.json"
+    },
+    {
+      "id": "Microsoft.Extensions.Hosting",
+      "version": "10.0.14",
+      "source": "https://api.nuget.org/v3-flatcontainer/microsoft.extensions.hosting/index.json"
+    },
+    {
+      "id": "Microsoft.Windows.CsWin32",
+      "version": "0.3.367",
+      "source": "https://api.nuget.org/v3-flatcontainer/microsoft.windows.cswin32/index.json"
+    },
+    {
+      "id": "Microsoft.Windows.CppWinRT",
+      "version": "3.0.260818.1",
+      "source": "https://api.nuget.org/v3-flatcontainer/microsoft.windows.cppwinrt/index.json"
+    },
+    {
+      "id": "Microsoft.Windows.ImplementationLibrary",
+      "version": "1.0.260126.7",
+      "source": "https://api.nuget.org/v3-flatcontainer/microsoft.windows.implementationlibrary/index.json"
+    },
+    {
+      "id": "nlohmann.json",
+      "version": "3.12.0",
+      "source": "https://api.nuget.org/v3-flatcontainer/nlohmann.json/index.json"
+    },
+    {
+      "id": "JsonSchema.Net",
+      "version": "9.5.0",
+      "source": "https://api.nuget.org/v3-flatcontainer/jsonschema.net/index.json"
+    },
+    {
+      "id": "WixToolset.Sdk",
+      "version": "7.0.1",
+      "source": "https://api.nuget.org/v3-flatcontainer/wixtoolset.sdk/index.json"
+    },
+    {
+      "id": "WixToolset.Bal.wixext",
+      "version": "7.0.1",
+      "source": "https://api.nuget.org/v3-flatcontainer/wixtoolset.bal.wixext/index.json"
+    },
+    {
+      "id": "WixToolset.Util.wixext",
+      "version": "7.0.1",
+      "source": "https://api.nuget.org/v3-flatcontainer/wixtoolset.util.wixext/index.json"
+    },
+    {
+      "id": "Microsoft.NET.Test.Sdk",
+      "version": "18.11.0",
+      "source": "https://api.nuget.org/v3-flatcontainer/microsoft.net.test.sdk/index.json"
+    },
+    {
+      "id": "xunit.v3",
+      "version": "4.0.2",
+      "source": "https://api.nuget.org/v3-flatcontainer/xunit.v3/index.json"
+    },
+    {
+      "id": "xunit.runner.visualstudio",
+      "version": "4.0.1",
+      "source": "https://api.nuget.org/v3-flatcontainer/xunit.runner.visualstudio/index.json"
+    },
+    {
+      "id": "coverlet.collector",
+      "version": "10.1.0",
+      "source": "https://api.nuget.org/v3-flatcontainer/coverlet.collector/index.json"
+    },
+    {
+      "id": "Microsoft.Windows.SDK.BuildTools",
+      "version": "10.0.28000.2957",
+      "source": "https://api.nuget.org/v3-flatcontainer/microsoft.windows.sdk.buildtools/index.json"
+    },
+    {
+      "id": "Microsoft.Windows.SDK.NET.Ref",
+      "version": "10.0.28000.87",
+      "source": "https://api.nuget.org/v3-flatcontainer/microsoft.windows.sdk.net.ref/index.json"
+    }
+  ]
+}

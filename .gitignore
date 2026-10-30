@@ -1,0 +1,57 @@
+# Visual Studio / native compiler
+.vs/
+**/Debug/
+**/Release/
+**/x64/
+**/x86/
+**/ARM64/
+*.user
+*.suo
+*.VC.db
+*.VC.opendb
+*.pdb
+*.ilk
+*.obj
+*.pch
+*.ipch
+
+# .NET, installer and test outputs
+**/bin/
+**/obj/
+TestResults/
+coverage/
+*.trx
+artifacts/
+out/
+build/
+AppPackages/
+BundleArtifacts/
+
+# Machine-local application state and credentials
+.local/
+data/
+logs/
+*.log
+*.dmp
+*.local.json
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+.env
+.env.*
+!.env.example
+*.pfx
+*.p12
+*.key
+
+# Editors / OS
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/tasks.json
+!.vscode/launch.json
+Thumbs.db
+.DS_Store
+
+# Keep dependency locks, authored rules, schemas and design sources tracked.
