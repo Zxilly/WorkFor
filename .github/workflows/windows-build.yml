@@ -1,0 +1,69 @@
+name: Windows build and package
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      strict_toolchain:
+        type: boolean
+        default: false
+        description: Require the documented latest stable native toolchain; fail rather than label an older toolchain as release-ready.
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test-package:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Bootstrap pinned local .NET SDK
+        run: ./scripts/bootstrap-dotnet.ps1
+      - name: Build and test
+        run: |
+          $taskStrict = '${{ inputs.strict_toolchain }}' -eq 'true'
+          $taskOptions = @{ Configuration = 'Release'; Test = $true }
+          if (-not $taskStrict) { $taskOptions.PrototypeToolchain = $true }
+          ./scripts/build.ps1 @taskOptions
+      - name: Publish portable and compile NSIS Setup without installing
+        run: |
+          $taskStrict = '${{ inputs.strict_toolchain }}' -eq 'true'
+          $taskOptions = @{ Configuration = 'Release'; Setup = $true }
+          if (-not $taskStrict) { $taskOptions.PrototypeToolchain = $true }
+          ./scripts/package.ps1 @taskOptions
+      - name: Verify launcher integrity rejection paths
+        run: ./installer/test-launcher.ps1 -Launcher ./out/cmake-native/bin/Release/WorkFor.exe
+      - name: Record what was verified
+        if: always()
+        run: |
+          @'
+          Build/test results belong to this workflow run, not a blanket Windows compatibility claim.
+          Artifacts are unsigned. PrototypeToolchain permits the hosted runner's available MSVC/CMake and records that gap in release.json.
+          Strict manual runs fail if the documented latest stable baseline is not installed.
+          NSIS 3.13 archive is checked against the official SourceForge SHA256. Setup is compiled, not installed by CI.
+          Explorer injection and native layout on an arbitrary runner build are not run.
+          '@ | Add-Content $env:GITHUB_STEP_SUMMARY
+          if (Test-Path out/toolchain-observed.json) { Get-Content out/toolchain-observed.json | Add-Content $env:GITHUB_STEP_SUMMARY }
+      - name: Upload unsigned artifacts and build evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: unsigned-windows-x64-${{ github.run_number }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            artifacts/*.zip
+            artifacts/*-Setup.exe
+            out/toolchain-observed.json
+            TestResults/**

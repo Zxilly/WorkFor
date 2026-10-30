@@ -2,7 +2,7 @@
   "checkedOn": "2026-10-30",
   "timezone": "Asia/Shanghai",
   "policy": "latest-stable-at-resolution; exact-version-and-transitive-lock",
-  "status": "design baseline; not a restored build lockfile",
+  "status": "selected dependencies verified and restored; native latest-toolchain qualification remains explicit in build metadata",
   "dotnet": {
     "sdk": "10.0.403",
     "runtime": "10.0.14",
@@ -20,56 +20,6 @@
       "source": "https://api.nuget.org/v3-flatcontainer/jint/index.json"
     },
     {
-      "id": "CommunityToolkit.Mvvm",
-      "version": "8.4.2",
-      "source": "https://api.nuget.org/v3-flatcontainer/communitytoolkit.mvvm/index.json"
-    },
-    {
-      "id": "Microsoft.Extensions.Hosting",
-      "version": "10.0.14",
-      "source": "https://api.nuget.org/v3-flatcontainer/microsoft.extensions.hosting/index.json"
-    },
-    {
-      "id": "Microsoft.Windows.CsWin32",
-      "version": "0.3.367",
-      "source": "https://api.nuget.org/v3-flatcontainer/microsoft.windows.cswin32/index.json"
-    },
-    {
-      "id": "Microsoft.Windows.CppWinRT",
-      "version": "3.0.260818.1",
-      "source": "https://api.nuget.org/v3-flatcontainer/microsoft.windows.cppwinrt/index.json"
-    },
-    {
-      "id": "Microsoft.Windows.ImplementationLibrary",
-      "version": "1.0.260126.7",
-      "source": "https://api.nuget.org/v3-flatcontainer/microsoft.windows.implementationlibrary/index.json"
-    },
-    {
-      "id": "nlohmann.json",
-      "version": "3.12.0",
-      "source": "https://api.nuget.org/v3-flatcontainer/nlohmann.json/index.json"
-    },
-    {
-      "id": "JsonSchema.Net",
-      "version": "9.5.0",
-      "source": "https://api.nuget.org/v3-flatcontainer/jsonschema.net/index.json"
-    },
-    {
-      "id": "WixToolset.Sdk",
-      "version": "7.0.1",
-      "source": "https://api.nuget.org/v3-flatcontainer/wixtoolset.sdk/index.json"
-    },
-    {
-      "id": "WixToolset.Bal.wixext",
-      "version": "7.0.1",
-      "source": "https://api.nuget.org/v3-flatcontainer/wixtoolset.bal.wixext/index.json"
-    },
-    {
-      "id": "WixToolset.Util.wixext",
-      "version": "7.0.1",
-      "source": "https://api.nuget.org/v3-flatcontainer/wixtoolset.util.wixext/index.json"
-    },
-    {
       "id": "Microsoft.NET.Test.Sdk",
       "version": "18.11.0",
       "source": "https://api.nuget.org/v3-flatcontainer/microsoft.net.test.sdk/index.json"
@@ -85,19 +35,15 @@
       "source": "https://api.nuget.org/v3-flatcontainer/xunit.runner.visualstudio/index.json"
     },
     {
-      "id": "coverlet.collector",
-      "version": "10.1.0",
-      "source": "https://api.nuget.org/v3-flatcontainer/coverlet.collector/index.json"
-    },
-    {
-      "id": "Microsoft.Windows.SDK.BuildTools",
-      "version": "10.0.28000.2957",
-      "source": "https://api.nuget.org/v3-flatcontainer/microsoft.windows.sdk.buildtools/index.json"
-    },
-    {
       "id": "Microsoft.Windows.SDK.NET.Ref",
       "version": "10.0.28000.87",
       "source": "https://api.nuget.org/v3-flatcontainer/microsoft.windows.sdk.net.ref/index.json"
+    },
+    {
+      "id": "Corvus.Text.Json.Validator",
+      "version": "5.7.9",
+      "source": "https://api.nuget.org/v3-flatcontainer/corvus.text.json.validator/index.json",
+      "license": "Apache-2.0"
     }
   ],
   "runtimeHost": {
@@ -110,13 +56,11 @@
   },
   "nativeLibraries": [
     {
-      "id": "MinHook",
-      "version": "1.3.4",
-      "source": "https://github.com/TsudaKageyu/minhook/releases/tag/v1.3.4",
-      "linkage": "static if required by verified adapter",
-      "platforms": [
-        "windows-x64"
-      ]
+      "id": "nlohmann/json",
+      "version": "3.12.0",
+      "source": "https://github.com/nlohmann/json/releases/tag/v3.12.0",
+      "license": "MIT",
+      "linkage": "header-only; restored with pinned SHA256"
     }
   ],
   "nativeTools": [
@@ -136,5 +80,63 @@
       "version": "1.13.2",
       "source": "https://github.com/ninja-build/ninja/releases/tag/v1.13.2"
     }
-  ]
+  ],
+  "designCandidates": [
+    {
+      "id": "CommunityToolkit.Mvvm",
+      "version": "8.4.2",
+      "source": "https://api.nuget.org/v3-flatcontainer/communitytoolkit.mvvm/index.json",
+      "status": "not linked by the current implementation"
+    },
+    {
+      "id": "Microsoft.Extensions.Hosting",
+      "version": "10.0.14",
+      "source": "https://api.nuget.org/v3-flatcontainer/microsoft.extensions.hosting/index.json",
+      "status": "not linked by the current implementation"
+    },
+    {
+      "id": "Microsoft.Windows.CsWin32",
+      "version": "0.3.367",
+      "source": "https://api.nuget.org/v3-flatcontainer/microsoft.windows.cswin32/index.json",
+      "status": "not linked by the current implementation"
+    },
+    {
+      "id": "Microsoft.Windows.CppWinRT",
+      "version": "3.0.260818.1",
+      "source": "https://api.nuget.org/v3-flatcontainer/microsoft.windows.cppwinrt/index.json",
+      "status": "not linked by the current implementation"
+    },
+    {
+      "id": "Microsoft.Windows.ImplementationLibrary",
+      "version": "1.0.260126.7",
+      "source": "https://api.nuget.org/v3-flatcontainer/microsoft.windows.implementationlibrary/index.json",
+      "status": "not linked by the current implementation"
+    },
+    {
+      "id": "nlohmann.json",
+      "version": "3.12.0",
+      "source": "https://api.nuget.org/v3-flatcontainer/nlohmann.json/index.json",
+      "status": "not linked by the current implementation"
+    },
+    {
+      "id": "coverlet.collector",
+      "version": "10.1.0",
+      "source": "https://api.nuget.org/v3-flatcontainer/coverlet.collector/index.json",
+      "status": "not linked by the current implementation"
+    },
+    {
+      "id": "Microsoft.Windows.SDK.BuildTools",
+      "version": "10.0.28000.2957",
+      "source": "https://api.nuget.org/v3-flatcontainer/microsoft.windows.sdk.buildtools/index.json",
+      "status": "not linked by the current implementation"
+    }
+  ],
+  "installer": {
+    "id": "NSIS",
+    "version": "3.13",
+    "source": "https://nsis.sourceforge.io/Docs/AppendixF.html",
+    "archiveSha256": "ba63dffc4410ee89193e1cb5a41989991bd77c61068da17e3156d136b7b0b3d8",
+    "compression": "zlib",
+    "scope": "per-user"
+  }
 }

@@ -1,0 +1,11 @@
+{
+  "version": "3.13",
+  "releasedOn": "2026-09-27",
+  "archive": "https://downloads.sourceforge.net/project/nsis/NSIS%203/3.13/nsis-3.13.zip",
+  "verifiedMirror": "https://github.com/tauri-apps/binary-releases/releases/download/nsis-3.13/nsis-3.13.zip",
+  "sha256": "ba63dffc4410ee89193e1cb5a41989991bd77c61068da17e3156d136b7b0b3d8",
+  "hashSource": "https://sourceforge.net/projects/nsis/files/NSIS%203/3.13/nsis-3.13.zip/download",
+  "releaseSource": "https://nsis.sourceforge.io/Docs/AppendixF.html",
+  "compression": "zlib",
+  "license": "zlib/libpng"
+}

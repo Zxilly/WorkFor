@@ -1,4 +1,8 @@
 <Solution>
+  <Folder Name="/experiments/" />
+  <Folder Name="/experiments/ui/">
+    <Project Path="experiments/ui/WorkFor.UI.ProtocolProbe.csproj" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/WorkFor.Contracts/WorkFor.Contracts.csproj" />
     <Project Path="src/WorkFor.Core/WorkFor.Core.csproj" />
@@ -9,6 +13,9 @@
   <Folder Name="/tests/">
     <Project Path="tests/WorkFor.Core.Tests/WorkFor.Core.Tests.csproj" />
     <Project Path="tests/WorkFor.Host.Tests/WorkFor.Host.Tests.csproj" />
+    <Project Path="tests/WorkFor.NativeFixture/WorkFor.NativeFixture.csproj" />
+    <Project Path="tests/WorkFor.Persistence.Tests/WorkFor.Persistence.Tests.csproj" />
     <Project Path="tests/WorkFor.ScriptHost.Tests/WorkFor.ScriptHost.Tests.csproj" />
+    <Project Path="tests/WorkFor.Validation.Tests/WorkFor.Validation.Tests.csproj" />
   </Folder>
 </Solution>

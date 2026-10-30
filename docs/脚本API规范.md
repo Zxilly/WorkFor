@@ -84,7 +84,7 @@ my-hourly-rule/
 
 ### 参数配置 UI
 
-宿主通过 ScriptHost 的独立候选验证模式调用 JsonSchema.Net 校验参数，自定义 Schema 的求值不在常驻 Host 线程执行；验证进程使用单独 Job 和 2 秒外部截止，失败不影响活动计算。只对简单的 `string`、`number`、`integer`、`boolean`、`enum`、`title`、`description` 生成原生输入控件；复杂对象允许在原生 JSON 文本框中编辑，并仍经过完整校验。
+宿主通过 ScriptHost 的独立候选验证模式调用 Corvus.Text.Json.Validator 校验参数，自定义 Schema 的求值不在常驻 Host 线程执行；验证进程使用单独 Job 和 2 秒外部截止，失败不影响活动计算。只对简单的 `string`、`number`、`integer`、`boolean`、`enum`、`title`、`description` 生成原生输入控件；复杂对象允许在原生 JSON 文本框中编辑，并仍经过完整校验。
 
 禁止远程 `$ref`；只允许文档内 `#/$defs/...` 引用，限制解析深度与循环。清单的 `$schema` 字符串用于标识方言，不发起 HTTP 请求。`pattern` 校验同样受正则与外部执行预算约束。缺少必要字段、额外字段和超过范围均不激活规则。
 
