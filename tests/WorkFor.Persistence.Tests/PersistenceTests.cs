@@ -58,44 +58,6 @@ public sealed class PersistenceTests : IDisposable
     }
 
     [Fact]
-    public async Task LegacyV1MigratesWithoutChangingParametersOrBusinessRevision()
-    {
-        var legacy = new ConfigurationStore(_root).Snapshot();
-        legacy["schemaVersion"]=1; legacy["revision"]=42;
-        legacy["rule"]!["parameters"]!["hourlyRate"]="37.25";
-        legacy["rule"]!.AsObject().Remove("manifest");
-        await WriteConfig(legacy);
-        var migrated = new ConfigurationStore(_root);
-        Assert.Equal(42,migrated.Revision);
-        Assert.Equal(2,migrated.Snapshot()["schemaVersion"]!.GetValue<int>());
-        Assert.Equal("37.25",migrated.Snapshot()["rule"]!["parameters"]!["hourlyRate"]!.GetValue<string>());
-        Assert.NotNull(migrated.RecoveryNotice);
-        Assert.Equal(1,JsonNode.Parse(await File.ReadAllTextAsync(Path.Combine(_root,"settings.backup.json"),TestContext.Current.CancellationToken))!["schemaVersion"]!.GetValue<int>());
-    }
-
-    [Fact]
-    public async Task PersistedParameterValidationRunsBeforeMigrationAndDoesNotPolluteBackup()
-    {
-        var valid = new ConfigurationStore(_root).Snapshot();
-        valid["rule"]!["parameters"]!["hourlyRate"]="22.50";
-        await File.WriteAllTextAsync(Path.Combine(_root,"settings.backup.json"),valid.ToJsonString(),TestContext.Current.CancellationToken);
-        var invalid=valid.DeepClone().AsObject();invalid["schemaVersion"]=1;
-        invalid["rule"]!["parameters"]!["hourlyRate"]="99.00";
-        invalid["rule"]!.AsObject().Remove("manifest");
-        await WriteConfig(invalid);
-        var checks=0;
-        var recovered=new ConfigurationStore(_root,persistedValidator:config=>
-        {
-            checks++;
-            return config["rule"]!["parameters"]!["hourlyRate"]!.GetValue<string>()=="99.00" ? new EvaluationError("PARAMETER_INVALID","Rejected by test schema") : null;
-        });
-        Assert.Equal(2,checks);
-        Assert.Equal("22.50",recovered.Snapshot()["rule"]!["parameters"]!["hourlyRate"]!.GetValue<string>());
-        Assert.Equal("22.50",JsonNode.Parse(await File.ReadAllTextAsync(Path.Combine(_root,"settings.backup.json"),TestContext.Current.CancellationToken))!["rule"]!["parameters"]!["hourlyRate"]!.GetValue<string>());
-        Assert.NotNull(recovered.RecoveryNotice);
-    }
-
-    [Fact]
     public void DefaultsAreAlsoPassedThroughPersistedValidator()
     {
         var count=0;

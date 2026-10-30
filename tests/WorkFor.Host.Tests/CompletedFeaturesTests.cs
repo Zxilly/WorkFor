@@ -91,7 +91,7 @@ public sealed class CompletedFeaturesTests
         { ["expectedRevision"] = 2, ["parameters"] = new JsonObject { ["hourlyRate"] = "48.00" } }, TestContext.Current.CancellationToken);
         await host.RestartAsync(directory => File.WriteAllText(Path.Combine(directory, "settings.json"), "{corrupt-primary"));
         var recovered = await host.RequestAsync("config.get", cancellationToken: TestContext.Current.CancellationToken);
-        Assert.Equal(2, recovered["schemaVersion"]!.GetValue<int>());
+        Assert.Equal(1, recovered["schemaVersion"]!.GetValue<int>());
         Assert.Equal(2, recovered["revision"]!.GetValue<long>());
         Assert.Equal("32.00", recovered["rule"]!["parameters"]!["hourlyRate"]!.GetValue<string>());
         var diagnostics = await host.RequestAsync("diagnostics.get", cancellationToken: TestContext.Current.CancellationToken);

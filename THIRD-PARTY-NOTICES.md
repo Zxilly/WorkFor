@@ -17,4 +17,4 @@ WorkFor 自有源码采用 [MIT](LICENSE)。第三方库、运行时和构建工
 
 发行包中的 `third-party`、`THIRD-PARTY-NOTICES.md` 和各运行时原始资料应一起分发，不能仅复制若干 EXE / DLL 后丢弃这些文件。
 
-早期设计中的 JsonSchema.Net / WiX 维护费二进制没有进入当前发行依赖，具体迁移说明见 [Schema 迁移](docs/schema-migration.md) 和 [安装说明](installer/README.md)。
+早期设计中的 JsonSchema.Net / WiX 维护费二进制没有进入当前发行依赖，具体迁移说明见 [Schema 迁移](docs/schema-validator.md) 和 [安装说明](installer/README.md)。

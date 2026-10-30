@@ -10,7 +10,7 @@ namespace WorkFor.Host;
 
 internal sealed partial class ConfigurationStore
 {
-    public const int CurrentSchemaVersion = 2;
+    public const int CurrentSchemaVersion = 1;
     private const long MaximumRevision = 9_007_199_254_740_990;
     private readonly string _directory;
     private readonly StartupRegistration? _startup;
@@ -35,16 +35,9 @@ internal sealed partial class ConfigurationStore
         {
             try
             {
-                _current = ReadPersisted(file, out var migrated);
-                if (migrated)
-                {
-                    try { AtomicJsonFile.WriteAsync(file, _current, backup, CancellationToken.None).GetAwaiter().GetResult(); }
-                    catch (Exception error) when (error is IOException or UnauthorizedAccessException)
-                    { throw new ConfigException("CONFIG_MIGRATION_FAILED", "配置可读取，但格式迁移无法保存；未回退或重置收入参数。"); }
-                    RecoveryNotice = "配置已从格式 v1 迁移到 v2；收入参数、规则源文和业务版本均保留。";
-                }
+                _current = ReadPersisted(file);
             }
-            catch (ConfigException error) when (error.Code is "SCHEMA_VERSION_UNSUPPORTED" or "CONFIG_MIGRATION_FAILED" or "CONFIG_VALIDATION_UNAVAILABLE") { throw; }
+            catch (ConfigException error) when (error.Code is "SCHEMA_VERSION_UNSUPPORTED" or "CONFIG_VALIDATION_UNAVAILABLE") { throw; }
             catch (Exception error) when (Recoverable(error)) { _current = Recover(file, backup); }
         }
         else if (File.Exists(backup)) _current = Recover(file, backup);
@@ -243,7 +236,7 @@ internal sealed partial class ConfigurationStore
       """)!.AsObject();
 
     private static JsonObject Defaults() => JsonNode.Parse("""
-      {"schemaVersion":2,"revision":1,
+      {"schemaVersion":1,"revision":1,
        "display":{"period":"day","locale":"zh-CN","currency":"CNY","taskbarWidthDip":260,"monitors":"primary"},
        "calendar":{"timeZone":"Asia/Shanghai","weekdays":[1,2,3,4,5],"shifts":[{"start":"09:00","end":"12:00"},{"start":"13:00","end":"18:00"}]},
        "rule":{"id":"builtin.hourly","version":"1.0.0","parameters":{"hourlyRate":"16.00"},"source":"import { money } from '@workfor/sdk';\nexport default function calculate(ctx) {\n const rate = money.fromDecimal(ctx.parameters.hourlyRate, ctx.currency.fractionDigits);\n return {apiVersion:1,currency:ctx.currency.code,amountMinor:money.ratio(rate,ctx.periods[ctx.activePeriod].elapsedScheduledMs,3600000,'floor'),ratePerHourMinor:rate};\n}"},

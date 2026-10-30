@@ -13,7 +13,7 @@ internal sealed partial class ConfigurationStore
     private JsonObject Recover(string file, string backup)
     {
         JsonObject recovered;
-        try { recovered = ReadPersisted(backup, out _); }
+        try { recovered = ReadPersisted(backup); }
         catch (ConfigException error) when (error.Code == "CONFIG_VALIDATION_UNAVAILABLE") { throw; }
         catch (Exception error) when (Recoverable(error))
         { throw new ConfigException("CONFIG_RECOVERY_FAILED", "配置损坏，且没有经过验证的有效备份；未重置工资或规则，请检查 settings 文件。"); }
@@ -25,23 +25,16 @@ internal sealed partial class ConfigurationStore
         return recovered;
     }
 
-    private JsonObject ReadPersisted(string file, out bool migrated)
+    private JsonObject ReadPersisted(string file)
     {
         var value = Read(file);
         var schema = value["schemaVersion"]?.GetValue<int>() ?? throw new ConfigException("CONFIG_INVALID", "缺少配置格式版本。");
-        if (schema is not (1 or CurrentSchemaVersion)) throw new ConfigException("SCHEMA_VERSION_UNSUPPORTED", "此配置格式不受当前版本支持；未回退到可能较旧的工资配置。");
-        migrated = schema == 1;
+        if (schema != CurrentSchemaVersion) throw new ConfigException("SCHEMA_VERSION_UNSUPPORTED", "此配置格式不受当前版本支持；未回退到可能较旧的工资配置。");
         var rule = value["rule"] as JsonObject ?? throw new ConfigException("CONFIG_INVALID", "缺少规则。");
         var source = rule["source"]?.GetValue<string>() ?? throw new ConfigException("CONFIG_INVALID", "缺少规则源文。");
         var expectedHash = Hash(source);
         if (rule["contentHash"] is { } stored && stored.GetValue<string>() != expectedHash) throw new ConfigException("CONFIG_INVALID", "活动规则哈希与源文不匹配。");
-        if (!migrated && rule["contentHash"] is null) throw new ConfigException("CONFIG_INVALID", "配置缺少活动规则哈希。");
-        if (migrated && rule["manifest"] is null)
-        {
-            if (rule["id"]?.GetValue<string>() != "builtin.hourly" || rule["version"]?.GetValue<string>() != "1.0.0") throw new ConfigException("MANIFEST_INVALID", "旧自定义规则缺少清单，无法自动推断其参数含义。");
-            rule["manifest"] = DefaultManifest();
-        }
-        value["schemaVersion"] = CurrentSchemaVersion;
+        if (rule["contentHash"] is null) throw new ConfigException("CONFIG_INVALID", "配置缺少活动规则哈希。");
         NormalizeAndValidate(value);
         ValidatePersisted(value);
         return value;

@@ -47,13 +47,13 @@ WorkFor.exe --verify       校验发行文件，不启动应用
 
 ## 验证与文档
 
-Debug / Release 的 **148 项托管测试、14 组原生测试通过**。本机真实任务栏验证了 180 / 260 / 360 DIP 空间预留、每秒更新和移除恢复；安装 / 卸载往返也已验证。物理点击和完整跨版本兼容矩阵仍需单独验证。
+Debug / Release 的 **146 项托管测试、14 组原生测试通过**。本机真实任务栏验证了 180 / 260 / 360 DIP 空间预留、每秒更新和移除恢复；安装 / 卸载往返也已验证。物理点击和完整跨版本兼容矩阵仍需单独验证。
 
 - [实现与验证进展](docs/实现进展.md)
 - [整体技术架构](docs/技术架构设计.md)
 - [自带任务栏组件](docs/自带任务栏组件.md)
 - [JavaScript API](docs/脚本API规范.md) 与 [类型声明](sdk/workfor-api.d.ts)
-- [依赖与构建](docs/依赖与构建.md)、[Schema 校验器迁移](docs/schema-migration.md)
+- [依赖与构建](docs/依赖与构建.md)、[Schema 校验器说明](docs/schema-validator.md)
 - [发布与安装](installer/README.md)
 - [原生引导](experiments/native-bootstrap/README.md)、[布局研究](experiments/taskbar/research-notes.md)、[补充验证](experiments/validation/README.md)、[Host](experiments/host/README.md)、[WinUI](experiments/ui/README.md)
 
