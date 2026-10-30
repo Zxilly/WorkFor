@@ -24,6 +24,11 @@ coverage/
 artifacts/
 out/
 build/
+CMakeFiles/
+CMakeCache.txt
+CMakeUserPresets.json
+compile_commands.json
+_deps/
 AppPackages/
 BundleArtifacts/
 

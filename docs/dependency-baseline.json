@@ -8,10 +8,6 @@
     "runtime": "10.0.14",
     "source": "https://builds.dotnet.microsoft.com/dotnet/release-metadata/10.0/releases.json"
   },
-  "windhawk": {
-    "version": "1.7.3",
-    "source": "https://github.com/ramensoftware/windhawk/releases/tag/v1.7.3"
-  },
   "packages": [
     {
       "id": "Microsoft.WindowsAppSDK",
@@ -102,6 +98,43 @@
       "id": "Microsoft.Windows.SDK.NET.Ref",
       "version": "10.0.28000.87",
       "source": "https://api.nuget.org/v3-flatcontainer/microsoft.windows.sdk.net.ref/index.json"
+    }
+  ],
+  "runtimeHost": {
+    "kind": "self-hosted-native",
+    "loader": "WorkFor.NativeBridge.exe",
+    "taskbarModule": "WorkFor.Taskbar.dll",
+    "nativeAbiVersion": 1,
+    "externalTaskbarFrameworkRequired": false,
+    "verification": "design only; injection and layout prototype pending"
+  },
+  "nativeLibraries": [
+    {
+      "id": "MinHook",
+      "version": "1.3.4",
+      "source": "https://github.com/TsudaKageyu/minhook/releases/tag/v1.3.4",
+      "linkage": "static if required by verified adapter",
+      "platforms": [
+        "windows-x64"
+      ]
+    }
+  ],
+  "nativeTools": [
+    {
+      "id": "Visual Studio 2026 Build Tools",
+      "version": "18.11.2",
+      "source": "https://learn.microsoft.com/visualstudio/releases/2026/release-notes",
+      "compilerVersion": "resolve and lock the stable-channel latest C++ x64 toolset at implementation; record cl /Bv"
+    },
+    {
+      "id": "CMake",
+      "version": "4.4.5",
+      "source": "https://github.com/Kitware/CMake/releases/tag/v4.4.5"
+    },
+    {
+      "id": "Ninja",
+      "version": "1.13.2",
+      "source": "https://github.com/ninja-build/ninja/releases/tag/v1.13.2"
     }
   ]
 }
