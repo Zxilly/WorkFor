@@ -21,9 +21,13 @@ internal sealed class SettingsWindow : Window
     private readonly InfoBar _feedback = new() { IsClosable = true };
     private readonly TextBlock _connection = WindowLayout.Label("正在连接计算宿主", "CaptionTextBlockStyle");
     private readonly ComboBox _period = new() { Header = "展示范围", MinWidth = 260 };
+    private readonly ComboBox _rulePicker = new() { Header = "计算方式", MinWidth = 300 };
     private readonly TextBox _currency = new() { Header = "币种", MaxLength = 3, Width = 260,
         HorizontalAlignment = HorizontalAlignment.Left };
     private readonly TextBox _parameters = JsonEditor("规则参数（JSON）", 120);
+    private readonly SchemaParameterForm _parameterForm = new();
+    private readonly TextBlock _parameterFallback = WindowLayout.Label("", "CaptionTextBlockStyle");
+    private readonly Expander _parametersExpander;
     private readonly TextBox _source = JsonEditor("JavaScript 规则", 280);
     private readonly TextBox _manifest = JsonEditor("规则清单与参数校验（JSON）", 240);
     private readonly Expander _manifestExpander;
@@ -31,6 +35,7 @@ internal sealed class SettingsWindow : Window
     private readonly TextBox _weekdays = new() { Header = "计薪工作日", PlaceholderText = "1,2,3,4,5",
         Description = "周一为 1，周日为 7；多个日期用英文逗号分隔。", MinWidth = 300 };
     private readonly TextBox _shifts = JsonEditor("计薪时段（JSON）", 160);
+    private readonly TextBox _dateOverrides = JsonEditor("日期覆盖（JSON）", 180);
     private readonly NumberBox _width = new() { Header = "任务栏请求宽度（DIP）", Minimum = 180, Maximum = 360,
         SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Inline, Width = 300,
         HorizontalAlignment = HorizontalAlignment.Left };
@@ -39,9 +44,18 @@ internal sealed class SettingsWindow : Window
     private readonly TextBlock _liveSnapshot = WindowLayout.Label("等待首次计算。", "CaptionTextBlockStyle");
     private readonly TextBlock _diagnostics = WindowLayout.Label("等待宿主诊断信息。");
     private readonly List<Button> _actions = [];
+    private readonly NavigationViewItem _exitItem = new()
+    {
+        Content = "退出 WorkFor", Tag = "exit", Icon = new FontIcon { Glyph = "\uE7E8" }
+    };
     private JsonObject? _config;
     private bool _busy;
     private bool _closed;
+    private bool _populating;
+    private IReadOnlyList<RuleCatalogItem> _catalog = [];
+    private string _section = "rules";
+    private bool _syncingParameters;
+    private string? _parameterSchemaKey;
 
     public SettingsWindow()
     {
@@ -50,6 +64,40 @@ internal sealed class SettingsWindow : Window
         _source.AcceptsReturn = true;
         _source.PlaceholderText = "可粘贴自定义入口脚本；留空使用当前规则。";
         _shifts.Description = "例如 [{\"start\":\"09:00\",\"end\":\"18:00\"}]。全天可用 start/end 均为 00:00 并设 endNextDay 为 true。";
+        _dateOverrides.Description = "用日期覆盖当日的计薪计划。例如 {\"2026-10-01\": []} 表示当天不计薪；值也可填写计薪时段数组。";
+        _parameterFallback.Foreground = WindowLayout.ResourceBrush("TextFillColorSecondaryBrush");
+        _parametersExpander = new Expander
+        {
+            Header = "高级：参数 JSON",
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Content = _parameters
+        };
+        _parameterForm.ParametersEdited += parameters =>
+        {
+            _syncingParameters = true;
+            try { _parameters.Text = parameters.ToJsonString(PrettyJson); }
+            finally { _syncingParameters = false; }
+        };
+        _parameters.TextChanged += (_, _) =>
+        {
+            if (!_populating && !_syncingParameters) RefreshParameterForm();
+        };
+        _manifest.TextChanged += (_, _) => { if (!_populating) RefreshParameterForm(); };
+        _rulePicker.SelectionChanged += (_, _) =>
+        {
+            if (_populating || _rulePicker.SelectedItem is not ComboBoxItem { Tag: RuleCatalogItem rule }) return;
+            _populating = true;
+            try
+            {
+                _source.Text = rule.Source;
+                _manifest.Text = rule.Manifest.ToJsonString(PrettyJson);
+                _parameters.Text = rule.DefaultParameters.ToJsonString(PrettyJson);
+            }
+            finally { _populating = false; }
+            RefreshParameterForm();
+            _preview.Text = "已载入候选规则。验证并应用后才会改变当前计算。";
+        };
         _manifestExpander = new Expander
         {
             Header = "高级：规则清单与参数 Schema",
@@ -65,10 +113,13 @@ internal sealed class SettingsWindow : Window
             ("收入规则", "rules", Symbol.Calculator), ("计薪日历", "calendar", Symbol.Calendar),
             ("任务栏", "taskbar", Symbol.View), ("诊断", "diagnostics", Symbol.Help)
         }) _navigation.MenuItems.Add(new NavigationViewItem { Content = title, Tag = tag, Icon = new SymbolIcon(icon) });
+        _navigation.FooterMenuItems.Add(_exitItem);
 
-        _navigation.SelectionChanged += (_, args) =>
+        _navigation.SelectionChanged += (sender, args) =>
         {
-            if (args.SelectedItemContainer?.Tag is string section) ShowSection(section);
+            if (args.SelectedItemContainer?.Tag is not string section) return;
+            if (section == "exit") { _ = RunAsync(ShutdownAsync); return; }
+            ShowSection(section);
         };
         var frame = new Grid();
         frame.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -107,6 +158,7 @@ internal sealed class SettingsWindow : Window
 
     private void ShowSection(string section)
     {
+        _section = section;
         // Unparent controls before moving reusable editors into the new section.
         _page.Children.Clear();
         _actions.Clear();
@@ -114,7 +166,7 @@ internal sealed class SettingsWindow : Window
         {
             case "calendar":
                 Heading("计薪日历", "金额根据当前时刻和计薪计划计算，睡眠或锁屏不会暂停计薪。");
-                Add(_timeZone, _weekdays, _shifts);
+                Add(_timeZone, _weekdays, _shifts, _dateOverrides);
                 _page.Children.Add(Action("应用日历", ApplyAsync, primary: true));
                 break;
             case "taskbar":
@@ -126,11 +178,19 @@ internal sealed class SettingsWindow : Window
                 Heading("诊断", "连接、规则和原生任务栏组件的状态均来自后台宿主。");
                 _page.Children.Add(_diagnostics);
                 _page.Children.Add(Action("读取诊断信息", LoadDiagnosticsAsync));
+                _page.Children.Add(Action("重新连接任务栏", async () =>
+                {
+                    await _client.RequestAsync("native.retry");
+                    await LoadDiagnosticsAsync();
+                }));
+                _page.Children.Add(WindowLayout.Divider());
+                _page.Children.Add(WindowLayout.Label("退出后将移除收入显示并停止后台程序。再次启动时会按当前时刻重新计算。"));
+                _page.Children.Add(Action("退出 WorkFor", ShutdownAsync));
                 _ = LoadDiagnosticsAsync();
                 break;
             default:
                 Heading("收入规则", "收入持续按当前时刻自动计算，每秒刷新。修改规则后先验证，再应用。");
-                Add(_period, _currency, _parameters, _source);
+                Add(_rulePicker, _period, _currency, _parameterForm, _parameterFallback, _parametersExpander, _source);
                 _page.Children.Add(_manifestExpander);
                 var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
                 buttons.Children.Add(Action("验证规则", ValidateAsync));
@@ -170,59 +230,92 @@ internal sealed class SettingsWindow : Window
     {
         await RunAsync(async () =>
         {
-            _config = await _client.RequestAsync("config.get");
+            var config = await _client.RequestAsync("config.get");
+            _catalog = RuleCatalogItem.Parse(await _client.RequestAsync("rule.catalog"));
+            _config = config;
             PopulateConfiguration();
             _feedback.IsOpen = false;
         });
     }
 
-    private void PopulateConfiguration()
+    private void PopulateConfiguration(string? section = null)
     {
-        var display = _config?["display"];
-        _period.SelectedIndex = display?["period"]?.GetValue<string>() == "month" ? 1 : 0;
-        _currency.Text = display?["currency"]?.GetValue<string>() ?? "CNY";
-        _width.Value = display?["taskbarWidthDip"]?.GetValue<int>() ?? 260;
-        _startWithWindows.IsOn = _config?["startWithWindows"]?.GetValue<bool>() ?? false;
-        _parameters.Text = _config?["rule"]?["parameters"]?.ToJsonString(PrettyJson) ?? "{}";
-        _source.Text = _config?["rule"]?["source"]?.GetValue<string>() ?? "";
-        _manifest.Text = _config?["rule"]?["manifest"]?.ToJsonString(PrettyJson) ?? "";
-        _timeZone.Text = _config?["calendar"]?["timeZone"]?.GetValue<string>() ?? "Asia/Shanghai";
-        _weekdays.Text = string.Join(",", (_config?["calendar"]?["weekdays"] as JsonArray
-            ?? new JsonArray(1, 2, 3, 4, 5)).Select(value => value?.ToString()));
-        _shifts.Text = _config?["calendar"]?["shifts"]?.ToJsonString(PrettyJson) ?? "[]";
+        _populating = true;
+        try
+        {
+            var display = _config?["display"];
+            if (section is null or "rules")
+            {
+                _rulePicker.Items.Clear();
+                _rulePicker.Items.Add(new ComboBoxItem { Content = "当前自定义规则" });
+                foreach (var rule in _catalog) _rulePicker.Items.Add(new ComboBoxItem { Content = rule.Name, Tag = rule });
+                var currentRuleId = _config?["rule"]?["id"]?.GetValue<string>();
+                _rulePicker.SelectedIndex = Math.Max(0, _catalog.ToList().FindIndex(rule => rule.Id == currentRuleId) + 1);
+                _period.SelectedIndex = display?["period"]?.GetValue<string>() == "month" ? 1 : 0;
+                _currency.Text = display?["currency"]?.GetValue<string>() ?? "CNY";
+                _parameters.Text = _config?["rule"]?["parameters"]?.ToJsonString(PrettyJson) ?? "{}";
+                _source.Text = _config?["rule"]?["source"]?.GetValue<string>() ?? "";
+                _manifest.Text = _config?["rule"]?["manifest"]?.ToJsonString(PrettyJson) ?? "";
+            }
+            if (section is null or "taskbar")
+            {
+                _width.Value = display?["taskbarWidthDip"]?.GetValue<int>() ?? 260;
+                _startWithWindows.IsOn = _config?["startWithWindows"]?.GetValue<bool>() ?? false;
+            }
+            if (section is null or "calendar")
+            {
+                _timeZone.Text = _config?["calendar"]?["timeZone"]?.GetValue<string>() ?? "Asia/Shanghai";
+                _weekdays.Text = string.Join(",", (_config?["calendar"]?["weekdays"] as JsonArray
+                    ?? new JsonArray(1, 2, 3, 4, 5)).Select(value => value?.ToString()));
+                _shifts.Text = _config?["calendar"]?["shifts"]?.ToJsonString(PrettyJson) ?? "[]";
+                _dateOverrides.Text = _config?["calendar"]?["dateOverrides"]?.ToJsonString(PrettyJson) ?? "{}";
+            }
+        }
+        finally { _populating = false; }
+        RefreshParameterForm();
         SetActionsEnabled();
+    }
+
+    private void RefreshParameterForm()
+    {
+        try
+        {
+            var parameters = JsonNode.Parse(_parameters.Text,
+                documentOptions: new JsonDocumentOptions { MaxDepth = 16 }) as JsonObject
+                ?? throw new InvalidDataException("规则参数必须是 JSON 对象。");
+            var manifest = JsonNode.Parse(_manifest.Text,
+                documentOptions: new JsonDocumentOptions { MaxDepth = 16 }) as JsonObject;
+            var schema = manifest?["parametersSchema"];
+            var key = schema?.ToJsonString() ?? "";
+            if (_parameterSchemaKey == key && _parameterForm.Visibility == Visibility.Visible
+                && _parameterForm.UpdateParameters(parameters, out _)) return;
+            var native = _parameterForm.Configure(schema, parameters, out var reason);
+            _parameterSchemaKey = key;
+            _parameterForm.Visibility = native ? Visibility.Visible : Visibility.Collapsed;
+            _parameterFallback.Text = reason;
+            _parameterFallback.Visibility = native ? Visibility.Collapsed : Visibility.Visible;
+            if (!native) _parametersExpander.IsExpanded = true;
+        }
+        catch (Exception error) when (error is JsonException or InvalidDataException or InvalidOperationException)
+        {
+            _parameterForm.Visibility = Visibility.Collapsed;
+            _parameterFallback.Visibility = Visibility.Visible;
+            _parameterFallback.Text = "参数或清单 JSON 尚未完整，请在高级编辑中修正后验证。";
+            _parametersExpander.IsExpanded = true;
+        }
     }
 
     private JsonObject Candidate()
     {
         if (_config is null) throw new InvalidOperationException("尚未读取配置。请先启动计算宿主。");
-        var parameters = JsonNode.Parse(_parameters.Text) as JsonObject
-            ?? throw new InvalidDataException("规则参数必须是 JSON 对象。");
-        var shifts = JsonNode.Parse(_shifts.Text) as JsonArray
-            ?? throw new InvalidDataException("计薪时段必须是 JSON 数组。");
-        var weekdays = _weekdays.Text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(value => int.Parse(value, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
-        if (weekdays.Length == 0 || weekdays.Any(day => day is < 1 or > 7))
-            throw new InvalidDataException("计薪工作日应为 1 至 7，并用英文逗号分隔。");
-        var display = (_config["display"]?.DeepClone() as JsonObject) ?? new JsonObject();
-        display["period"] = (_period.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "day";
-        display["currency"] = _currency.Text.Trim().ToUpperInvariant();
-        display["taskbarWidthDip"] = checked((int)_width.Value);
-        var calendar = (_config["calendar"]?.DeepClone() as JsonObject) ?? new JsonObject();
-        calendar["timeZone"] = _timeZone.Text.Trim();
-        calendar["weekdays"] = new JsonArray(weekdays.Select(day => JsonValue.Create(day)).ToArray<JsonNode?>());
-        calendar["shifts"] = shifts;
-        var candidate = new JsonObject
-        {
-            ["expectedRevision"] = _config["revision"]?.GetValue<long>() ?? 0,
-            ["parameters"] = parameters, ["display"] = display, ["calendar"] = calendar,
-            ["startWithWindows"] = _startWithWindows.IsOn
-        };
-        if (!string.IsNullOrWhiteSpace(_source.Text)) candidate["source"] = _source.Text;
-        if (!string.IsNullOrWhiteSpace(_manifest.Text))
-            candidate["manifest"] = JsonNode.Parse(_manifest.Text) as JsonObject
-                ?? throw new InvalidDataException("规则清单必须是 JSON 对象。");
-        return candidate;
+        if (_parameterForm.Visibility == Visibility.Visible) _parameterForm.CommitPendingEdits();
+        var calendar = _config["calendar"]!.AsObject();
+        var weekdays = string.Join(",", calendar["weekdays"]!.AsArray().Select(day => day!.ToString()));
+        return new SettingsDraft(
+            (_period.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "day", _currency.Text,
+            _config["display"]!["taskbarWidthDip"]!.GetValue<int>(), _config["startWithWindows"]!.GetValue<bool>(),
+            _parameters.Text, _source.Text, _manifest.Text, calendar["timeZone"]!.GetValue<string>(), weekdays,
+            calendar["shifts"]!.ToJsonString(), calendar["dateOverrides"]?.ToJsonString() ?? "{}").BuildCandidate(_config);
     }
 
     private async Task ValidateAsync()
@@ -240,12 +333,35 @@ internal sealed class SettingsWindow : Window
 
     private async Task ApplyAsync()
     {
-        var candidate = Candidate();
+        if (_config is null) throw new InvalidOperationException("尚未读取配置。");
+        var section = _section;
+        var candidate = section switch
+        {
+            "calendar" => new JsonObject
+            {
+                ["expectedRevision"] = _config["revision"]!.DeepClone(),
+                ["calendar"] = SettingsDraft.BuildCalendar(_config["calendar"] as JsonObject,
+                    _timeZone.Text, _weekdays.Text, _shifts.Text, _dateOverrides.Text)
+            },
+            "taskbar" => new JsonObject
+            {
+                ["expectedRevision"] = _config["revision"]!.DeepClone(),
+                ["display"] = new JsonObject { ["taskbarWidthDip"] = checked((int)_width.Value) },
+                ["startWithWindows"] = _startWithWindows.IsOn
+            },
+            _ => Candidate()
+        };
         await _client.RequestAsync("rule.validate", candidate.DeepClone() as JsonObject);
         await _client.RequestAsync("config.activate", candidate);
         _config = await _client.RequestAsync("config.get");
-        PopulateConfiguration();
+        PopulateConfiguration(section);
         Feedback("已应用", "计算宿主将按新规则立即更新金额。", InfoBarSeverity.Success);
+    }
+
+    private async Task ShutdownAsync()
+    {
+        await _client.RequestAsync("host.shutdown");
+        App.CloseAllWindows();
     }
 
     private async Task LoadDiagnosticsAsync()
@@ -254,6 +370,9 @@ internal sealed class SettingsWindow : Window
         {
             var result = await _client.RequestAsync("diagnostics.get");
             _diagnostics.Text = result.ToJsonString(PrettyJson);
+            if (result["configRecoveryNotice"] is JsonValue notice
+                && notice.TryGetValue<string>(out var recovery) && !string.IsNullOrWhiteSpace(recovery))
+                Feedback("已恢复设置", recovery, InfoBarSeverity.Warning);
         }
         catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException
             or OperationCanceledException or TimeoutException
@@ -272,7 +391,7 @@ internal sealed class SettingsWindow : Window
         catch (HostRequestException error)
         {
             Feedback(error.Code == "CONFIG_CONFLICT" ? "配置已在其他窗口更新" : "修改未生效",
-                error.Message, InfoBarSeverity.Error);
+                UiMessages.Error(error.Code, error.Message), InfoBarSeverity.Error);
             if (error.Code == "CONFIG_CONFLICT")
                 _connection.Text = "请关闭并重新打开设置，读取最新配置后再应用。";
         }
@@ -288,7 +407,10 @@ internal sealed class SettingsWindow : Window
 
     private void SetActionsEnabled()
     {
+        _navigation.IsEnabled = !_busy;
         foreach (var action in _actions) action.IsEnabled = !_busy && _config is not null;
+        _rulePicker.IsEnabled = !_busy && _config is not null;
+        _exitItem.IsEnabled = !_busy;
     }
 
     private void Feedback(string title, string message, InfoBarSeverity severity)

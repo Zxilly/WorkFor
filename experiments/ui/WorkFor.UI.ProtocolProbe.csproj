@@ -7,6 +7,9 @@
     <SupportedOSPlatformVersion>7.0</SupportedOSPlatformVersion>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Remove="FormProbe/**/*.cs" />
     <Compile Include="../../src/WorkFor.UI/HostClient.cs" Link="HostClient.cs" />
+    <Compile Include="../../src/WorkFor.UI/SettingsDraft.cs" Link="SettingsDraft.cs" />
+    <Compile Include="../../src/WorkFor.UI/ParameterFormModel.cs" Link="ParameterFormModel.cs" />
   </ItemGroup>
 </Project>

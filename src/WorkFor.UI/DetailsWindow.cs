@@ -11,13 +11,17 @@ namespace WorkFor.UI;
 internal sealed class DetailsWindow : Window
 {
     private readonly HostClient _client = new();
-    private readonly TextBlock _title = WindowLayout.Label("今日收入", "SubtitleTextBlockStyle");
+    private readonly TextBlock _title = WindowLayout.Label("收入", "SubtitleTextBlockStyle");
     private readonly TextBlock _amount = WindowLayout.Label("--", "TitleLargeTextBlockStyle");
     private readonly TextBlock _status = WindowLayout.Label("正在连接计算宿主", "CaptionTextBlockStyle");
     private readonly TextBlock _rate = WindowLayout.Label("--");
+    private readonly TextBlock _rateLabel = WindowLayout.Label("当前时薪");
+    private readonly TextBlock _currency = WindowLayout.Label("", "CaptionTextBlockStyle");
     private readonly TextBlock _elapsed = WindowLayout.Label("--");
     private readonly TextBlock _note = WindowLayout.Label("", "CaptionTextBlockStyle");
     private readonly InfoBar _connection = new() { IsClosable = false, Severity = InfoBarSeverity.Warning };
+    private readonly InfoBar _error = new() { IsClosable = false, Severity = InfoBarSeverity.Error, Title = "计算失败" };
+    private readonly Grid _rateRow;
     private DisplaySnapshot? _last;
 
     public DetailsWindow(RectInt32? anchor = null)
@@ -27,12 +31,24 @@ internal sealed class DetailsWindow : Window
         var body = new StackPanel { Padding = new Thickness(24), Spacing = 12 };
         _status.Foreground = WindowLayout.ResourceBrush("TextFillColorSecondaryBrush");
         _note.Foreground = WindowLayout.ResourceBrush("TextFillColorSecondaryBrush");
+        _currency.Foreground = WindowLayout.ResourceBrush("TextFillColorSecondaryBrush");
         body.Children.Add(_title);
-        body.Children.Add(_amount);
+        var amountLine = new Grid { ColumnSpacing = 8 };
+        amountLine.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        amountLine.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        _currency.VerticalAlignment = VerticalAlignment.Bottom;
+        _amount.TextWrapping = TextWrapping.Wrap;
+        _currency.Margin = new Thickness(0, 0, 0, 8);
+        amountLine.Children.Add(_amount);
+        Grid.SetColumn(_currency, 1);
+        amountLine.Children.Add(_currency);
+        body.Children.Add(amountLine);
         body.Children.Add(_status);
+        body.Children.Add(_error);
         body.Children.Add(WindowLayout.Divider());
-        body.Children.Add(DetailRow(Symbol.Clock, "当前时薪", _rate));
-        body.Children.Add(DetailRow(Symbol.Calendar, "计薪时长", _elapsed));
+        _rateRow = DetailRow(Symbol.Clock, _rateLabel, _rate);
+        body.Children.Add(_rateRow);
+        body.Children.Add(DetailRow(Symbol.Calendar, WindowLayout.Label("计薪时长"), _elapsed));
         body.Children.Add(_note);
         body.Children.Add(WindowLayout.Divider());
         var settings = new Button { HorizontalAlignment = HorizontalAlignment.Stretch,
@@ -52,7 +68,7 @@ internal sealed class DetailsWindow : Window
         settings.Click += (_, _) => WindowLayout.OpenSettings();
         body.Children.Add(settings);
         body.Children.Add(_connection);
-        Content = body;
+        Content = new ScrollViewer { Content = body, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
         body.KeyDown += OnKeyDown;
         WindowLayout.Configure(this, 380, 420, compact: true, anchor);
         _client.SnapshotReceived += snapshot => DispatcherQueue.TryEnqueue(() => ShowSnapshot(snapshot));
@@ -62,14 +78,13 @@ internal sealed class DetailsWindow : Window
 
     internal void MoveToAnchor(RectInt32? anchor) => WindowLayout.Configure(this, 380, 420, compact: true, anchor);
 
-    private static Grid DetailRow(Symbol icon, string label, TextBlock value)
+    private static Grid DetailRow(Symbol icon, TextBlock title, TextBlock value)
     {
         var grid = new Grid { ColumnSpacing = 12, Margin = new Thickness(0, 4, 0, 4) };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         grid.Children.Add(new SymbolIcon(icon) { Width = 20, Height = 20 });
-        var title = WindowLayout.Label(label);
         Grid.SetColumn(title, 1);
         grid.Children.Add(title);
         Grid.SetColumn(value, 2);
@@ -82,10 +97,15 @@ internal sealed class DetailsWindow : Window
         _last = snapshot;
         _title.Text = snapshot.Title;
         _amount.Text = snapshot.AmountText;
-        AutomationProperties.SetName(_amount, $"{snapshot.Title}{snapshot.AmountText}");
+        _currency.Text = snapshot.Currency;
+        AutomationProperties.SetName(_amount, $"{snapshot.Title}{snapshot.AmountText} {snapshot.Currency}");
         _status.Text = snapshot.Status == "fresh"
             ? "实时更新 · 每秒刷新" : snapshot.StatusText;
-        _rate.Text = string.IsNullOrEmpty(snapshot.RateText) ? "未提供" : snapshot.RateText;
+        _rate.Text = snapshot.RateText;
+        _rateLabel.Text = snapshot.RateLabel;
+        _rateRow.Visibility = string.IsNullOrEmpty(snapshot.RateText) ? Visibility.Collapsed : Visibility.Visible;
+        _error.IsOpen = snapshot.ErrorMessage.Length > 0;
+        _error.Message = snapshot.ErrorMessage;
         _elapsed.Text = snapshot.ScheduledElapsedText;
         _note.Text = snapshot.Note;
         _note.Visibility = string.IsNullOrWhiteSpace(snapshot.Note) ? Visibility.Collapsed : Visibility.Visible;

@@ -51,6 +51,7 @@ public partial class App : Application
 
     private static void ActivateArguments(string[] args)
     {
+        if (args.Contains("--quit", StringComparer.OrdinalIgnoreCase)) { CloseAllWindows(); return; }
         var settings = args.Contains("--settings", StringComparer.OrdinalIgnoreCase);
         var existing = Windows.FirstOrDefault(window => settings ? window is SettingsWindow : window is DetailsWindow);
         if (existing is not null)
@@ -72,4 +73,11 @@ public partial class App : Application
         };
         window.Activate();
     }
+
+    internal static void CloseAllWindows()
+    {
+        foreach (var window in Windows.ToArray()) window.Close();
+    }
+
+    internal static void OpenSettings() => ActivateArguments(["--settings"]);
 }

@@ -77,7 +77,7 @@ internal static class WindowLayout
 
     public static void OpenSettings()
     {
-        App.Show(new SettingsWindow());
+        App.OpenSettings();
     }
 
     [DllImport("user32.dll")]

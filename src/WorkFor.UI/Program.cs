@@ -14,7 +14,7 @@ internal static class Program
     public static int Main(string[] args)
     {
         var pipeName = HostClient.PipeName("ui");
-        using var ownership = new Mutex(true, @"Local\" + pipeName, out var primary);
+        using var ownership = new Mutex(false, @"Local\" + pipeName, out var primary);
         if (!primary)
         {
             try
@@ -42,6 +42,7 @@ internal static class Program
             }
         }
 
+        if (args.Contains("--quit", StringComparer.OrdinalIgnoreCase)) return 0;
         WinRT.ComWrappersSupport.InitializeComWrappers();
         Application.Start(_ =>
         {

@@ -159,7 +159,7 @@ internal sealed class HostClient : IAsyncDisposable
 
 internal sealed record DisplaySnapshot(string Generation, long Sequence, string Title, string AmountText,
     string Status, string StatusText, string RateText, string ScheduledElapsedText, string Note,
-    long EvaluatedAtMs)
+    long EvaluatedAtMs, string Currency, string RateLabel, string ErrorMessage)
 {
     public static DisplaySnapshot Parse(JsonObject value) => new(
         Text(value, "generation", ""),
@@ -171,7 +171,19 @@ internal sealed record DisplaySnapshot(string Generation, long Sequence, string 
         Text(value, "rateText", ""),
         Text(value, "scheduledElapsedText", "--"),
         Text(value, "note", ""),
-        value["evaluatedAtMs"]?.GetValue<long>() ?? 0);
+        value["evaluatedAtMs"]?.GetValue<long>() ?? 0,
+        Text(value, "currency", ""),
+        Text(value, "rateLabel", "当前时薪"),
+        Error(value));
+
+    private static string Error(JsonObject value)
+    {
+        if (value["error"] is not JsonObject error) return "";
+        var message = UiMessages.Error(Text(error, "code", ""), Text(error, "message", "计算未成功，请检查规则。"));
+        if (error["line"] is JsonValue line && line.TryGetValue<int>(out var lineNumber))
+            message += $"（第 {lineNumber} 行，第 {error["column"]?.GetValue<int>() ?? 1} 列）";
+        return message;
+    }
 
     private static string Text(JsonObject value, string name, string fallback)
     {
