@@ -1,0 +1,29 @@
+{
+  "verifiedOn": "2026-10-30",
+  "scope": "owned Win32 target and private pipe tests only; no new Explorer injection",
+  "bootstrapAttempts": 2,
+  "ownedTargetBootstrapPassed": true,
+  "productionExplorerHooked": false,
+  "protocolTests": {
+    "deepJsonRejected": true,
+    "duplicatePropertyRejected": true,
+    "fragmentedFrame": true,
+    "malformedJsonRejected": true,
+    "nonObjectRejected": true,
+    "oversizedHeaderRejected": true,
+    "partialHeaderRejected": true,
+    "readDeadlineEnforced": true
+  },
+  "runtimeControlTests": {
+    "cancelWithoutEofIsBounded": true,
+    "fragmentedConfigure": true,
+    "framedConfigure": true,
+    "invalidWidthRejected": true,
+    "latestValueMerged": true,
+    "oversizedFrameRejected": true,
+    "partialFrameEofRejected": true,
+    "shutdownCancelsReader": true,
+    "stdinEofCancelsReader": true
+  },
+  "compiler": "MSVC 14.44.35207, /std:c++20 /MT /W4; final CI/toolchain validation is separate"
+}

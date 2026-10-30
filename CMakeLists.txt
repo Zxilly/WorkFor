@@ -27,6 +27,7 @@ add_executable(WorkFor.NativeBridge
   src/WorkFor.NativeBridge/BootstrapClient.cpp
   src/WorkFor.NativeBridge/DiscoveryWatcher.cpp
   src/WorkFor.NativeBridge/ControlStdio.cpp
+  src/WorkFor.NativeBridge/RuntimeControl.cpp
   src/WorkFor.NativeBridge/ProtocolSelfTest.cpp)
 
 foreach(target WorkFor.Taskbar WorkFor.Taskbar.Live WorkFor.NativeBridge)
@@ -58,3 +59,12 @@ target_link_options(WorkFor.Adapter.Tests PRIVATE
 set_target_properties(WorkFor.Adapter.Tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 add_test(NAME native-xaml-layout COMMAND WorkFor.Adapter.Tests)
 set_tests_properties(native-xaml-layout PROPERTIES TIMEOUT 30)
+
+add_executable(WorkFor WIN32 src/WorkFor.Launcher/main.cpp)
+target_include_directories(WorkFor PRIVATE "${WORKFOR_JSON_INCLUDE}")
+target_compile_definitions(WorkFor PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
+target_compile_options(WorkFor PRIVATE /W4 /utf-8 /permissive- /EHsc)
+target_link_libraries(WorkFor PRIVATE user32 shell32 advapi32 bcrypt ole32)
+set_target_properties(WorkFor PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+
+add_subdirectory(experiments/validation)

@@ -1,5 +1,6 @@
 #include "Bootstrap.h"
 #include "Adapter.h"
+#include "Compatibility.h"
 #include "../WorkFor.Native.Contracts/Win32Support.h"
 #include <atomic>
 #include <mutex>
@@ -15,9 +16,10 @@ std::atomic<bool> g_attached{false};
 std::atomic<HWND> g_controlWindow{};
 constexpr UINT kUiCommandMessage = WM_APP + 101;
 struct UiCommand {
-    enum class Kind { Attach, Update, Detach } kind{};
+    enum class Kind { Attach, Update, Configure, Inspect, Detach } kind{};
     double widthDip{260};
-    std::wstring amount, status, diagnostic;
+    std::wstring amount, status, title, diagnostic;
+    std::string inspectionJson;
     HRESULT result{E_PENDING};
     UniqueHandle completed{CreateEventW(nullptr, TRUE, FALSE, nullptr)};
 };
@@ -28,19 +30,30 @@ std::mutex g_activationGate;
 std::atomic<bool> g_activationPending{false};
 workfor::taskbar::Activation g_activation{};
 std::atomic<DWORD> g_displayServerPid{};
+std::atomic<HANDLE> g_activationEvent{};
+std::atomic<unsigned> g_clickFramesSent{};
+std::atomic<unsigned> g_displayConnections{};
 
 void OnActivation(const workfor::taskbar::Activation& activation, void*) noexcept {
     // User input runs inside Explorer. Grant the connected Host foreground
     // permission before it starts/activates its UI; do no pipe IO here.
-    if (const auto hostPid = g_displayServerPid.load()) AllowSetForegroundWindow(hostPid);
+    const auto hostPid = g_displayServerPid.load();
+    if (!hostPid) return; // Do not replay an old user click after a later reconnect.
+    AllowSetForegroundWindow(hostPid);
     {
         std::lock_guard lock(g_activationGate);
         g_activation = activation;
     }
     g_activationPending.store(true, std::memory_order_release);
+    if (const auto ready = g_activationEvent.load()) SetEvent(ready);
 }
 
 LRESULT CALLBACK ControlWindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
+    if (message == WM_NCDESTROY && g_controlWindow.load() == window) {
+        std::wstring diagnostic;
+        if (SUCCEEDED(workfor::taskbar::AdapterDetach(diagnostic))) g_attached.store(false);
+        g_controlWindow.store(nullptr);
+    }
     if (message == kUiCommandMessage) {
         std::shared_ptr<UiCommand> command;
         {
@@ -55,9 +68,14 @@ LRESULT CALLBACK ControlWindowProc(HWND window, UINT message, WPARAM wParam, LPA
             command->result = workfor::taskbar::AdapterAttach(
                 reinterpret_cast<HWND>(GetWindowLongPtrW(window, GWLP_USERDATA)),
                 command->widthDip, command->diagnostic);
-            if (SUCCEEDED(command->result)) g_attached.store(true);
+            g_attached.store(workfor::taskbar::AdapterHasLease());
         } else if (command->kind == UiCommand::Kind::Update) {
-            command->result = workfor::taskbar::AdapterUpdate(command->amount, command->status);
+            command->result = workfor::taskbar::AdapterUpdate(command->amount, command->status, command->title);
+        } else if (command->kind == UiCommand::Kind::Configure) {
+            command->result = workfor::taskbar::AdapterConfigure(command->widthDip, command->diagnostic);
+        } else if (command->kind == UiCommand::Kind::Inspect) {
+            command->result = workfor::taskbar::AdapterInspect(
+                reinterpret_cast<HWND>(GetWindowLongPtrW(window, GWLP_USERDATA)), command->inspectionJson);
         } else {
             command->result = workfor::taskbar::AdapterDetach(command->diagnostic);
             if (SUCCEEDED(command->result)) {
@@ -73,14 +91,15 @@ LRESULT CALLBACK ControlWindowProc(HWND window, UINT message, WPARAM wParam, LPA
 }
 
 HWND CreateControlWindow(HWND taskbarWindow) {
-    constexpr wchar_t name[] = L"WorkFor.Taskbar.Control.Live.v1";
+    const auto name = L"WorkFor.Taskbar.Control.v1." +
+        std::to_wstring(reinterpret_cast<UINT_PTR>(g_module));
     WNDCLASSW windowClass{};
     windowClass.hInstance = g_module;
-    windowClass.lpszClassName = name;
+    windowClass.lpszClassName = name.c_str();
     windowClass.lpfnWndProc = ControlWindowProc;
     if (!RegisterClassW(&windowClass) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
         throw Win32Error("RegisterClassW(native control)");
-    HWND window = CreateWindowExW(0, name, L"", 0, 0, 0, 0, 0,
+    HWND window = CreateWindowExW(0, name.c_str(), L"", 0, 0, 0, 0, 0,
         HWND_MESSAGE, nullptr, g_module, nullptr);
     if (!window) throw Win32Error("CreateWindowExW(native control)");
     SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(taskbarWindow));
@@ -113,12 +132,58 @@ std::uint64_t UnixNowMs() {
     return (ticks - 116444736000000000ULL) / 10'000;
 }
 
+class ActivationWriter final {
+public:
+    explicit ActivationWriter(HANDLE pipe) : pipe_(pipe), stop_(CreateEventW(nullptr, TRUE, FALSE, nullptr)) {
+        if (!stop_) throw Win32Error("CreateEventW(activation writer stop)");
+        HANDLE ready = g_activationEvent.load();
+        if (!ready) {
+            HANDLE created = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+            if (!created) throw Win32Error("CreateEventW(activation ready)");
+            if (!g_activationEvent.compare_exchange_strong(ready, created)) CloseHandle(created);
+            else ready = created;
+        }
+        ready_ = ready;
+        if (g_activationPending.load()) SetEvent(ready_);
+        thread_ = std::thread([this] { Run(); });
+    }
+    ~ActivationWriter() { SetEvent(stop_.get()); if (thread_.joinable()) thread_.join(); }
+private:
+    void Run() noexcept {
+        try {
+            const HANDLE events[]{stop_.get(), ready_};
+            while (WaitForMultipleObjects(2, events, FALSE, INFINITE) == WAIT_OBJECT_0 + 1) {
+                if (!g_activationPending.exchange(false, std::memory_order_acq_rel)) continue;
+                workfor::taskbar::Activation activation;
+                { std::lock_guard lock(g_activationGate); activation = g_activation; }
+                const auto& rect = activation.screenPhysicalBounds;
+                WriteFrame(pipe_, {{"protocolVersion", 1}, {"type", "ui.openDetails"},
+                    {"requestId", "native-click"}, {"payload", {
+                        {"coordinateType", "physicalPixels"}, {"dpi", activation.dpi},
+                        {"anchorRect", {{"x", rect.left}, {"y", rect.top},
+                            {"width", rect.right - rect.left}, {"height", rect.bottom - rect.top}}}
+                    }}}, 1'000);
+                g_clickFramesSent.fetch_add(1);
+            }
+        } catch (...) {
+            // A failed writer invalidates this duplex connection and wakes its
+            // overlapped reader; the owner reconnects instead of losing clicks.
+            CancelIoEx(pipe_, nullptr);
+        }
+    }
+    HANDLE pipe_{};
+    HANDLE ready_{};
+    UniqueHandle stop_;
+    std::thread thread_;
+};
+
 void DisplayWorker(std::atomic<bool>& stop, std::atomic<unsigned>& updateCount) noexcept {
     try {
         const auto name = L"\\\\.\\pipe\\workfor-display-v1-" + TokenSid(GetCurrentProcess()) +
             L"-" + std::to_wstring(ProcessSession(GetCurrentProcessId()));
         std::string generation;
         std::uint64_t sequence{};
+        std::wstring lastAmount = L"--";
         while (!stop.load()) {
             try {
                 if (!WaitNamedPipeW(name.c_str(), 500)) { Sleep(100); continue; }
@@ -136,18 +201,9 @@ void DisplayWorker(std::atomic<bool>& stop, std::atomic<unsigned>& updateCount) 
                 WriteFrame(pipe.get(), {{"protocolVersion", 1}, {"type", "display.subscribe"},
                     {"requestId", "native-live"}, {"payload", nlohmann::json::object()}}, 1'000);
                 g_displayServerPid.store(pid);
+                g_displayConnections.fetch_add(1);
+                ActivationWriter activationWriter(pipe.get());
                 while (!stop.load()) {
-                    if (g_activationPending.exchange(false, std::memory_order_acq_rel)) {
-                        workfor::taskbar::Activation activation;
-                        { std::lock_guard lock(g_activationGate); activation = g_activation; }
-                        const auto& rect = activation.screenPhysicalBounds;
-                        WriteFrame(pipe.get(), {{"protocolVersion", 1}, {"type", "ui.openDetails"},
-                            {"requestId", "native-click"}, {"payload", {
-                                {"coordinateType", "physicalPixels"}, {"dpi", activation.dpi},
-                                {"anchorRect", {{"x", rect.left}, {"y", rect.top},
-                                    {"width", rect.right - rect.left}, {"height", rect.bottom - rect.top}}}
-                            }}}, 1'000);
-                    }
                     const auto message = ReadFrame(pipe.get(), 1'500);
                     if (message.value("protocolVersion", 0) != 1 ||
                         message.value("type", "") != "display.snapshot" || !message.contains("payload"))
@@ -160,18 +216,20 @@ void DisplayWorker(std::atomic<bool>& stop, std::atomic<unsigned>& updateCount) 
                     generation = nextGeneration; sequence = nextSequence;
                     auto amount = Wide(payload.value("amountText", "--"));
                     auto status = Wide(payload.value("statusText", ""));
-                    if (amount.size() > 80 || status.size() > 40) throw Win32Error("Display string too long", ERROR_INVALID_DATA);
+                    auto title = Wide(payload.value("title", "收入"));
+                    if (amount.size() > 80 || status.size() > 40 || title.size() > 40)
+                        throw Win32Error("Display string too long", ERROR_INVALID_DATA);
                     if (payload.value("expiresAtMs", std::uint64_t{}) <= UnixNowMs()) status = L"等待更新";
                     auto command = std::make_shared<UiCommand>();
                     command->kind = UiCommand::Kind::Update;
-                    command->amount = std::move(amount); command->status = std::move(status);
-                    if (SUCCEEDED(InvokeUi(command))) updateCount.fetch_add(1);
+                    command->amount = amount; command->status = std::move(status); command->title = std::move(title);
+                    if (SUCCEEDED(InvokeUi(command))) { lastAmount = std::move(amount); updateCount.fetch_add(1); }
                 }
             } catch (...) {
                 g_displayServerPid.store(0);
                 if (!stop.load()) {
                     auto command = std::make_shared<UiCommand>(); command->kind = UiCommand::Kind::Update;
-                    command->amount = L"--"; command->status = L"连接中";
+                    command->amount = lastAmount; command->status = L"连接中";
                     InvokeUi(command, 1'000); Sleep(200);
                 }
             }
@@ -227,6 +285,17 @@ DWORD WINAPI ControlWorker(void* parameter) noexcept {
         if (!GetNamedPipeServerProcessId(pipe.get(), &serverPid) ||
             serverPid != request->bridgePid)
             throw Win32Error("Native bridge server identity", ERROR_ACCESS_DENIED);
+
+        if (request->inspectOnly) {
+            std::wstring preparation;
+            const auto prepared = workfor::taskbar::PrepareTaskbarCompatibility(preparation);
+            if (FAILED(prepared)) {
+                WriteFrame(pipe.get(), {{"protocolVersion", 1}, {"type", "native.error"},
+                    {"code", "UNSUPPORTED_BUILD"}, {"hresult", prepared},
+                    {"diagnostic", Utf8(preparation)}, {"layoutAttached", false}}, kHandshakeTimeoutMs);
+                throw std::runtime_error("Taskbar module preparation failed");
+            }
+        }
         UniqueHandle server(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,
             FALSE, serverPid));
         if (!server || TokenSid(server.get()) != TokenSid(GetCurrentProcess()) ||
@@ -257,13 +326,26 @@ DWORD WINAPI ControlWorker(void* parameter) noexcept {
         if (generation.empty() || generation.size() > 128)
             throw Win32Error("Invalid generation", ERROR_INVALID_DATA);
 
-        const auto state = [&](const char* value) {
+        double widthDip = 260.0;
+        std::uint64_t configRevision{};
+        const auto state = [&](const char* value, const std::string& requestId = std::string{},
+            const std::string& code = std::string{}) {
             WriteFrame(pipe.get(), {{"protocolVersion", 1}, {"type", "native.state"},
                 {"generation", generation}, {"state", value},
-                {"layoutAttached", g_attached.load()}, {"displayUpdates", updateCount.load()}}, kCommandTimeoutMs);
+                {"layoutAttached", g_attached.load()}, {"displayUpdates", updateCount.load()},
+                {"displayConnections", g_displayConnections.load()},
+                {"clickFramesSent", g_clickFramesSent.load()},
+                {"widthDip", widthDip}, {"configRevision", configRevision},
+                {"requestId", requestId}, {"code", code},
+                {"targetProcessId", GetCurrentProcessId()},
+                {"targetCreationTime", std::to_string(ProcessCreationTime(GetCurrentProcess()))}}, kCommandTimeoutMs);
         };
         state("Bootstrapped");
-        if (request->inspectOnly) {
+        if (request->inspectOnly && accept.value("includeInspection", true)) {
+            auto inspection = std::make_shared<UiCommand>(); inspection->kind = UiCommand::Kind::Inspect;
+            const auto hr = InvokeUi(inspection);
+            if (FAILED(hr)) throw std::runtime_error("ROOT_INSPECTION_FAILED");
+            request->inspectionJson = inspection->inspectionJson;
             // Serialize non-ASCII as escapes before splitting; every fragment
             // is a valid UTF-8 JSON string even at a chunk boundary.
             if (request->inspectionJson.empty() || request->inspectionJson.size() > kMaxInspectionBytes)
@@ -310,6 +392,8 @@ DWORD WINAPI ControlWorker(void* parameter) noexcept {
                 if (!activeMarker) throw Win32Error("Active marker missing");
                 auto ui = std::make_shared<UiCommand>(); ui->kind = UiCommand::Kind::Attach;
                 ui->widthDip = command.value("widthDip", 260.0);
+                widthDip = ui->widthDip;
+                configRevision = command.value("configRevision", std::uint64_t{});
                 detached = false; // A timed-out queued attach may still run.
                 const auto hr = InvokeUi(ui);
                 if (FAILED(hr)) {
@@ -323,11 +407,27 @@ DWORD WINAPI ControlWorker(void* parameter) noexcept {
                     display = std::thread(DisplayWorker, std::ref(stopDisplay), std::ref(updateCount));
                     state("Attached");
                 }
+            } else if (type == "native.configure") {
+                const auto requestId = command.value("requestId", "");
+                const auto requested = command.value("widthDip", 0.0);
+                auto ui = std::make_shared<UiCommand>(); ui->kind = UiCommand::Kind::Configure;
+                ui->widthDip = requested;
+                const auto hr = request->liveCapable ? InvokeUi(ui) : E_ACCESSDENIED;
+                if (SUCCEEDED(hr)) {
+                    widthDip = requested;
+                    configRevision = command.value("configRevision", std::uint64_t{});
+                    state("Attached", requestId, ui->diagnostic == L"INSUFFICIENT_SPACE" ? "INSUFFICIENT_SPACE" : "CONFIGURED");
+                } else {
+                    WriteFrame(pipe.get(), {{"protocolVersion", 1}, {"type", "native.error"},
+                        {"generation", generation}, {"requestId", requestId},
+                        {"code", "NATIVE_CONFIGURATION_FAILED"}, {"hresult", hr},
+                        {"layoutAttached", g_attached.load()}}, kCommandTimeoutMs);
+                }
             } else throw Win32Error("Unknown control message", ERROR_INVALID_DATA);
         }
     } catch (...) {
-        // No exception may unwind into Explorer. No UI/adapter state has been
-        // attached in this P0 worker, so disconnected state is already dormant.
+        // No exception may unwind into Explorer. The common cleanup path below
+        // must reverse any active UI before releasing its activity marker.
     }
     stopDisplay.store(true);
     if (display.joinable()) display.join();
@@ -382,18 +482,16 @@ LRESULT CALLBACK WorkForBootstrapHook(int code, WPARAM wParam, LPARAM lParam) {
                         GetModuleFileNameW(g_module, moduleName.data(), static_cast<DWORD>(moduleName.size()));
                         request->liveCapable = inspectOnly &&
                             _wcsicmp(std::filesystem::path(moduleName.data()).filename().c_str(), L"WorkFor.Taskbar.Live.dll") == 0;
-                        if (request->liveCapable && !g_controlWindow.load())
-                            g_controlWindow.store(CreateControlWindow(message.hwnd));
                         if (inspectOnly) {
-                            std::string inspection;
-                            const auto hr = workfor::taskbar::AdapterInspect(message.hwnd, inspection);
-                            // AdapterInspect is readonly and independently
-                            // verifies module fingerprint/prologs/owner thread.
-                            request->inspectionJson = inspection.empty()
-                                ? nlohmann::json{{"result", hr},
-                                    {"diagnostic", "ADAPTER_INSPECTION_FAILED"},
-                                    {"nodes", nlohmann::json::array()}}.dump()
-                                : std::move(inspection);
+                            const auto current = g_controlWindow.load();
+                            DWORD currentOwnerProcess{};
+                            const auto currentOwnerThread = current && IsWindow(current)
+                                ? GetWindowThreadProcessId(current, &currentOwnerProcess) : 0;
+                            if (!current || !currentOwnerThread ||
+                                currentOwnerProcess != GetCurrentProcessId() ||
+                                currentOwnerThread != GetCurrentThreadId())
+                                g_controlWindow.store(CreateControlWindow(message.hwnd));
+                            else SetWindowLongPtrW(current, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(message.hwnd));
                         }
                         UniqueHandle worker(CreateThread(nullptr, 0, ControlWorker,
                             request.get(), 0, nullptr));

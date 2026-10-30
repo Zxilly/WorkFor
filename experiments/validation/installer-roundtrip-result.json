@@ -1,0 +1,16 @@
+{
+  "actualInstallExecuted": true,
+  "salaryDataUntouched": true,
+  "registrationRemoved": true,
+  "explorerInjectionExecuted": false,
+  "packageIntegrityVerified": true,
+  "passed": true,
+  "actualUninstallExecuted": true,
+  "applicationStarted": false,
+  "installationRemoved": true,
+  "shortcutsRemoved": true,
+  "quotedStartupEntryRemoved": true,
+  "setupFile": "WorkFor-0.1.0-win-x64-prototype-bfb6fd18-Setup.exe",
+  "setupSha256": "de79d807acc59a28631da080d8a66105e13916a600f3dc915406cca77ba32ddc",
+  "version": "0.1.0"
+}

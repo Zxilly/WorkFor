@@ -20,7 +20,11 @@ HRESULT AdapterInspect(HWND taskbarWindow, std::string& json) noexcept;
 // Experimental, opt-in only: strict fingerprint and structural validation are
 // required before adding a real Grid column. No overlay and no inline hook.
 HRESULT AdapterAttach(HWND taskbarWindow, double widthDip, std::wstring& diagnostic) noexcept;
-HRESULT AdapterUpdate(const std::wstring& amount, const std::wstring& status) noexcept;
+HRESULT AdapterUpdate(const std::wstring& amount, const std::wstring& status,
+    const std::wstring& title = L"") noexcept;
+HRESULT AdapterConfigure(double widthDip, std::wstring& diagnostic) noexcept;
+// UI-thread only: also true for an owned partial layout awaiting reversal.
+bool AdapterHasLease() noexcept;
 HRESULT AdapterDetach(std::wstring& diagnostic) noexcept;
 
 } // namespace workfor::taskbar

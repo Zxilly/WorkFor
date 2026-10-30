@@ -1,0 +1,46 @@
+{
+  "recordedOn": "2026-10-30",
+  "scope": "owned-process regression validation only",
+  "managedRecoveryBudget": {
+    "sdk": "10.0.403",
+    "tests": 21,
+    "passed": 21,
+    "failed": 0
+  },
+  "managedNativeSession": {
+    "sdk": "10.0.403",
+    "tests": 11,
+    "passed": 11,
+    "failed": 0,
+    "realOwnedChildProcess": true,
+    "protocol": "length-prefixed JSON stdin; JSONL stdout",
+    "fixtureHasNoNativeInjection": true
+  },
+  "managedTotal": 32,
+  "nativeFramework": {
+    "tests": 12,
+    "passed": 12,
+    "failed": 0,
+    "compiler": "MSVC 19.44.35220.0",
+    "windowsSdk": "10.0.26100.0",
+    "latestReleaseToolchainQualified": false,
+    "dpiEvidence": {
+      "physicalDpi": 144,
+      "rasterizationScale": 1.5,
+      "incomeWidthDip": 260,
+      "anchorWidthPixels": 390
+    },
+    "themeEvidence": {
+      "lightTextRgbSum": 0,
+      "darkTextRgbSum": 765
+    },
+    "fontEnlargementEvidence": [
+      { "fontMultiplier": 1.5, "amountYDip": 8, "amountHeightDip": 31.9219, "buttonHeightDip": 48 },
+      { "fontMultiplier": 2, "amountYDip": 2.66667, "amountHeightDip": 42.5625, "buttonHeightDip": 48 }
+    ]
+  },
+  "noExplorerInjection": true,
+  "noExplorerRestart": true,
+  "noGlobalInput": true,
+  "redaction": "Contains no user SID, process ID, window handle, memory address or private configuration."
+}

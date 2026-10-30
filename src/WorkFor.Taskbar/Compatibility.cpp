@@ -7,6 +7,8 @@
 #include <iomanip>
 #include <sstream>
 #include <vector>
+#include <atomic>
+#include <mutex>
 #include <winrt/Windows.UI.Core.h>
 
 #pragma comment(lib, "bcrypt.lib")
@@ -14,6 +16,8 @@
 
 namespace workfor::taskbar {
 namespace {
+std::atomic<HMODULE> g_validatedModule{};
+std::mutex g_preparationGate;
 
 struct Handle {
     HANDLE value{INVALID_HANDLE_VALUE};
@@ -118,6 +122,34 @@ HRESULT FingerprintModuleFile(const std::wstring& path, ModuleFingerprint& resul
     } catch (...) { return winrt::to_hresult(); }
 }
 
+HRESULT PrepareTaskbarCompatibility(std::wstring& diagnostic) noexcept {
+    try {
+        const auto module = GetModuleHandleW(L"taskbar.dll");
+        if (!module) { diagnostic = L"TASKBAR_MODULE_NOT_LOADED"; return HRESULT_FROM_WIN32(ERROR_MOD_NOT_FOUND); }
+        if (g_validatedModule.load(std::memory_order_acquire) == module) return S_OK;
+        std::lock_guard lock(g_preparationGate);
+        if (g_validatedModule.load(std::memory_order_relaxed) == module) return S_OK;
+        std::array<wchar_t, 32768> path{};
+        const auto count = GetModuleFileNameW(module, path.data(), static_cast<DWORD>(path.size()));
+        if (!count || count >= path.size()) return HRESULT_FROM_WIN32(GetLastError());
+        ModuleFingerprint fingerprint;
+        const auto hr = FingerprintModuleFile(path.data(), fingerprint);
+        if (FAILED(hr)) { diagnostic = L"MODULE_FINGERPRINT_FAILED"; return hr; }
+        if (fingerprint.sha256 != kResearchTaskbarSha256) {
+            diagnostic = L"UNSUPPORTED_BUILD: exact taskbar fingerprint is required";
+            return HRESULT_FROM_WIN32(ERROR_REVISION_MISMATCH);
+        }
+        // Retain the verified OS module mapping so its base cannot be reused
+        // after a load/unload cycle while the cached proof remains valid.
+        HMODULE retained{};
+        if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+            reinterpret_cast<LPCWSTR>(module), &retained)) return HRESULT_FROM_WIN32(GetLastError());
+        g_validatedModule.store(retained, std::memory_order_release);
+        diagnostic = L"EXACT_MODULE_PREPARED";
+        return S_OK;
+    } catch (...) { diagnostic = L"MODULE_PREPARATION_FAILED"; return winrt::to_hresult(); }
+}
+
 HRESULT ResolveCurrentTaskbarRoot(HWND taskbarWindow,
     winrt::Windows::UI::Xaml::FrameworkElement& root, std::wstring& diagnostic) noexcept {
     root = nullptr;
@@ -140,16 +172,11 @@ HRESULT ResolveCurrentTaskbarRoot(HWND taskbarWindow,
         }
         const auto module = GetModuleHandleW(L"taskbar.dll");
         if (!module) { diagnostic = L"TASKBAR_MODULE_NOT_LOADED"; return HRESULT_FROM_WIN32(ERROR_MOD_NOT_FOUND); }
-        std::array<wchar_t, 32768> path{};
-        if (!GetModuleFileNameW(module, path.data(), static_cast<DWORD>(path.size())))
-            return HRESULT_FROM_WIN32(GetLastError());
-        ModuleFingerprint fingerprint;
-        auto hr = FingerprintModuleFile(path.data(), fingerprint);
-        if (FAILED(hr)) { diagnostic = L"MODULE_FINGERPRINT_FAILED"; return hr; }
-        if (fingerprint.sha256 != kResearchTaskbarSha256) {
-            diagnostic = L"UNSUPPORTED_BUILD: exact research fingerprint is required";
+        if (g_validatedModule.load(std::memory_order_acquire) != module) {
+            diagnostic = L"MODULE_NOT_PREPARED: worker fingerprint validation is required";
             return HRESULT_FROM_WIN32(ERROR_REVISION_MISMATCH);
         }
+        HRESULT hr{};
         const auto base = reinterpret_cast<const BYTE*>(module);
         if (!Matches(base, kGetHostRva, kGetHostBytes) || !Matches(base, kFrameHeightRva, kFrameHeightBytes) ||
             !Matches(base, kDecrefRva, kDecrefBytes)) {

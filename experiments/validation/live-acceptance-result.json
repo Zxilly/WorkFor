@@ -1,0 +1,22 @@
+{
+  "passed": true,
+  "cleanupConfirmed": true,
+  "physicalMouseClickTested": false,
+  "noStartupRegistrySync": true,
+  "widthCases": [
+    {
+      "configRevision": 2,
+      "actualDip": 180,
+      "applicationsDip": 1995.33,
+      "requestedDip": 180
+    },
+    {
+      "configRevision": 3,
+      "actualDip": 360,
+      "applicationsDip": 1815.33,
+      "requestedDip": 360
+    }
+  ],
+  "configurationSchema": 2,
+  "monthlyRuleActivated": true
+}

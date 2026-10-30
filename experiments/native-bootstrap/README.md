@@ -138,6 +138,29 @@ WorkFor.NativeBridge.exe --run-explorer
 
 必须重定向 stdin / stdout。Host 仅保持 stdin 打开即可，关闭 stdin / EOF 触发自动 detach。stdout 为 JSON 行 `bridge.liveState`，其 payload 具有 state、layoutAttached、displayUpdates；每秒一行。停止成功后输出 `bridge.liveStopped`。此模式不与 `--stdio` 的二进制控制帧混用。
 
+### MVP 控制协议更新
+
+持续模式现在接受初始宽度：`--run-explorer --width 240`，180—360 DIP。stdin 不再是忽略内容的生命周期管道，而是 4 字节 little-endian 长度 + UTF-8 JSON 控制帧：
+
+```json
+{
+  "protocolVersion": 1,
+  "type": "native.configure",
+  "requestId": "preview-7",
+  "payload": { "widthDip": 240, "configRevision": 7 }
+}
+```
+
+配置通过 `AdapterConfigure` 在原有列内生效，不重新加载 DLL。成功输出 JSONL `bridge.configureResult`，回显 requestId、widthDip、configRevision；快速尚未派发的配置只保留最新值，Host 应按最新预览语义处理。`CONFIGURED` 和 `INSUFFICIENT_SPACE` 是非故障状态，后者表示可用空间不足时收入区域已折叠并释放其布局宽度。
+
+`native.shutdown` 控制帧和 stdin EOF 都请求逻辑分离。输入线程用 PeekNamedPipe 后有界读取，显式取消无需等待父进程先关闭 stdin。持续模式没有固定运行年限，状态历史最多保留 32 项。
+
+Explorer 退出 / 任务栏窗口重建会报告目标 PID、创建时间和恢复计数；恢复预算是 10 分钟最多 3 次，等待 Explorer ready 最长 60 秒，等待旧活动组件清理最多 10 秒。未知指纹不重试。Host 另负责持久化隔离预算。DLL 文件指纹检查移到控制 worker 并缓存到保留的模块映射，UI 线程仅检查内存字节、vtable、对象和线程归属。
+
+MVP 新增修复包括：动态宽度、窄空间折叠、大字模式折叠标题行、长金额省略、日 / 月标题与辅助功能名称一致、绑定布局属性在修改前保守拒绝、同一模块不同 UI 线程的控制窗口重新创建、不同 PIN 模块控制窗口按模块实例隔离。
+
+验证摘要见 [native-control-selftest.json](native-control-selftest.json)：2 次受控引导、8 项帧错误检查、9 项 RuntimeControl 检查通过。独立 XAML 布局验证还覆盖字体 1.5x / 2x、恢复 caption、月标题、原生 Invoke、绑定保护等场景。新 MVP 二进制与首次 Live 研究二进制不同；是否完成新会话真实验证，以主任务记录为准。
+
 ### 真实运行结果
 
 2026-10-30 集成实验已执行 10 秒 Live 与第二次现有模块观测，完成自动分离，无需重启 Explorer。脱敏摘要见 [live-layout-result.json](live-layout-result.json)：

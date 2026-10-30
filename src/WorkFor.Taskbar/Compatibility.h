@@ -22,6 +22,10 @@ struct ModuleFingerprint {
 
 HRESULT FingerprintModuleFile(const std::wstring& path, ModuleFingerprint& result) noexcept;
 
+// File IO/SHA must run on the control worker before dispatching any UI work.
+// Resolver only consumes this exact-module proof plus in-memory byte checks.
+HRESULT PrepareTaskbarCompatibility(std::wstring& diagnostic) noexcept;
+
 // Must run inside the taskbar Explorer on the owning taskbar UI thread.
 // This strictly matched research resolver performs no UI mutation or inline hook.
 HRESULT ResolveCurrentTaskbarRoot(

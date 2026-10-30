@@ -1,38 +1,15 @@
 #include "BootstrapClient.h"
 #include "ProtocolSelfTest.h"
+#include "RuntimeControl.h"
 #include "../WorkFor.Taskbar/Compatibility.h"
 #include <TlHelp32.h>
 #include <thread>
 #include <functional>
 #include <iostream>
+#include <deque>
 
 namespace workfor::native {
 namespace {
-class StdinLifetime final {
-public:
-    UniqueHandle stopped{CreateEventW(nullptr, TRUE, FALSE, nullptr)};
-    StdinLifetime() {
-        if (!stopped) throw Win32Error("CreateEventW(stdin lifetime)");
-        const auto input = GetStdHandle(STD_INPUT_HANDLE);
-        if (GetFileType(input) != FILE_TYPE_PIPE)
-            throw std::invalid_argument("--run-explorer requires redirected stdin held by its owner");
-        reader_ = std::thread([this, input] {
-            std::array<BYTE, 64> ignored{};
-            DWORD read{};
-            while (ReadFile(input, ignored.data(), static_cast<DWORD>(ignored.size()), &read, nullptr) && read) {}
-            SetEvent(stopped.get());
-        });
-    }
-    ~StdinLifetime() {
-        SetEvent(stopped.get());
-        if (reader_.joinable()) {
-            CancelSynchronousIo(reader_.native_handle());
-            reader_.join();
-        }
-    }
-private:
-    std::thread reader_;
-};
 class OwnedProbe final {
 public:
     UniqueHandle process;
@@ -111,8 +88,8 @@ void ConnectServer(HANDLE pipe) {
 
 nlohmann::json RunOneAttempt(const TargetIdentity& target, HOOKPROC hookEntry,
     HMODULE module, std::uint32_t attempt, bool inspectOnly = false,
-    unsigned liveDurationSeconds = 0, HANDLE stopEvent = nullptr,
-    const std::function<void(const nlohmann::json&)>& progress = {}) {
+    unsigned liveDurationSeconds = 0, RuntimeControl* control = nullptr,
+    double initialWidth = 260.0, const std::function<void(const nlohmann::json&)>& progress = {}) {
     CurrentUserSecurity security;
     const auto pipeName = ProbePipeName(GetCurrentProcessId(), attempt);
     UniqueHandle pipe(CreateNamedPipeW(pipeName.c_str(), PIPE_ACCESS_DUPLEX |
@@ -134,6 +111,8 @@ nlohmann::json RunOneAttempt(const TargetIdentity& target, HOOKPROC hookEntry,
     if (!GetNamedPipeClientProcessId(pipe.get(), &clientPid) || clientPid != target.processId)
         throw Win32Error("Named pipe target identity mismatch", ERROR_ACCESS_DENIED);
     const auto hello = ReadFrame(pipe.get(), kHandshakeTimeoutMs);
+    if (hello.value("type", "") == "native.error")
+        throw BridgeFailure(hello.value("code", "NATIVE_START_FAILED"), hello.value("diagnostic", "Native bootstrap preparation failed"));
     if (hello.value("protocolVersion", 0) != 1 || hello.value("type", "") != "native.hello" ||
         hello.value("nativeAbiVersion", 0) != 1 ||
         hello.value("processId", 0UL) != target.processId ||
@@ -148,7 +127,8 @@ nlohmann::json RunOneAttempt(const TargetIdentity& target, HOOKPROC hookEntry,
     const auto generation = std::to_string(GetCurrentProcessId()) + "-" +
         std::to_string(attempt);
     WriteFrame(pipe.get(), {{"protocolVersion", 1}, {"type", "native.accept"},
-        {"nativeAbiVersion", 1}, {"generation", generation}}, kCommandTimeoutMs);
+        {"nativeAbiVersion", 1}, {"generation", generation},
+        {"includeInspection", control == nullptr}}, kCommandTimeoutMs);
     auto state = ReadFrame(pipe.get(), kCommandTimeoutMs);
     if (state.value("state", "") != "Bootstrapped" ||
         state.value("generation", "") != generation || state.value("layoutAttached", true))
@@ -156,7 +136,7 @@ nlohmann::json RunOneAttempt(const TargetIdentity& target, HOOKPROC hookEntry,
 
     nlohmann::json inspection;
     nlohmann::json unsupported;
-    if (inspectOnly) {
+    if (inspectOnly && !control) {
         std::string result;
         size_t expectedCount{};
         for (size_t index = 0;; ++index) {
@@ -177,7 +157,7 @@ nlohmann::json RunOneAttempt(const TargetIdentity& target, HOOKPROC hookEntry,
             if (index + 1 == count) break;
         }
         inspection = nlohmann::json::parse(result);
-    } else {
+    } else if (!inspectOnly) {
         WriteFrame(pipe.get(), {{"protocolVersion", 1}, {"type", "native.attach"},
             {"generation", generation}}, kCommandTimeoutMs);
         unsupported = ReadFrame(pipe.get(), kCommandTimeoutMs);
@@ -188,27 +168,56 @@ nlohmann::json RunOneAttempt(const TargetIdentity& target, HOOKPROC hookEntry,
 
     nlohmann::json attached;
     auto leaseStates = nlohmann::json::array();
-    if (liveDurationSeconds) {
+    if (liveDurationSeconds || control) {
+        const auto initial = control ? control->Configuration() : RuntimeConfiguration{initialWidth};
+        std::uint64_t appliedSerial = initial.serial;
         WriteFrame(pipe.get(), {{"protocolVersion", 1}, {"type", "native.attach"},
-            {"generation", generation}, {"widthDip", 260.0}}, kCommandTimeoutMs);
+            {"generation", generation}, {"widthDip", initial.widthDip},
+            {"configRevision", initial.configRevision}}, kCommandTimeoutMs);
         attached = ReadFrame(pipe.get(), kCommandTimeoutMs);
         if (attached.value("state", "") != "Attached" ||
             !attached.value("layoutAttached", false))
-            throw std::runtime_error("Live attach failed: " + attached.dump());
+            throw BridgeFailure(attached.value("layoutAttached", false) ? "DETACH_PENDING" :
+                (attached.value("diagnostic", "") == "UI_OPERATION_PENDING" ? "UI_OPERATION_PENDING" : "LAYOUT_ATTACH_FAILED"),
+                "Live attach failed: " + attached.dump());
+        if (!initial.requestId.empty()) attached["requestId"] = initial.requestId;
         if (progress) progress(attached);
-        for (unsigned tick = 0; tick < liveDurationSeconds; ++tick) {
-            if (stopEvent) {
-                if (WaitForSingleObject(stopEvent, 1'000) == WAIT_OBJECT_0) break;
+        const auto endTime = GetTickCount64() + static_cast<ULONGLONG>(liveDurationSeconds) * 1'000;
+        auto nextLease = GetTickCount64() + 1'000;
+        while (control ? !control->Stopping() : GetTickCount64() < endTime) {
+            if (control) {
+                if (control->Wait(200)) break;
+                for (const auto& notification : control->TakeNotifications())
+                    std::cout << notification.dump() << std::endl;
+                const auto configuration = control->Configuration();
+                if (configuration.serial != appliedSerial) {
+                    WriteFrame(pipe.get(), {{"protocolVersion", 1}, {"type", "native.configure"},
+                        {"generation", generation}, {"widthDip", configuration.widthDip},
+                        {"configRevision", configuration.configRevision},
+                        {"requestId", configuration.requestId}}, kCommandTimeoutMs);
+                    const auto configured = ReadFrame(pipe.get(), kCommandTimeoutMs);
+                    if (progress) progress(configured);
+                    appliedSerial = configuration.serial;
+                }
             } else Sleep(1'000);
+            if (WaitForSingleObject(target.process.get(), 0) != WAIT_TIMEOUT)
+                throw BridgeFailure("EXPLORER_EXITED", "Target Explorer exited", target.processId, target.creationTime);
+            DWORD currentPid{};
+            if (!IsWindow(target.window) ||
+                GetWindowThreadProcessId(target.window, &currentPid) != target.threadId ||
+                currentPid != target.processId)
+                throw BridgeFailure("TASKBAR_RECREATED", "Taskbar window identity changed", target.processId, target.creationTime);
+            if (control && GetTickCount64() < nextLease) continue;
+            nextLease = GetTickCount64() + 1'000;
             WriteFrame(pipe.get(), {{"protocolVersion", 1}, {"type", "native.lease"},
                 {"generation", generation}}, kCommandTimeoutMs);
             auto current = ReadFrame(pipe.get(), kCommandTimeoutMs);
             if (current.value("state", "") != "Attached" ||
                 !current.value("layoutAttached", false))
-                throw std::runtime_error("Live lease failed: " + current.dump());
+                throw BridgeFailure("CONTROL_CHANNEL_LOST", "Live lease failed: " + current.dump());
             if (progress) progress(current);
             // Continuous sessions must not retain an unbounded status history.
-            if (leaseStates.size() == 300) leaseStates.erase(leaseStates.begin());
+            if (leaseStates.size() == 32) leaseStates.erase(leaseStates.begin());
             leaseStates.push_back(std::move(current));
         }
     }
@@ -218,13 +227,13 @@ nlohmann::json RunOneAttempt(const TargetIdentity& target, HOOKPROC hookEntry,
     const auto dormant = ReadFrame(pipe.get(), kCommandTimeoutMs);
     if (dormant.value("state", "") != "Dormant" ||
         dormant.value("generation", "") != generation || dormant.value("layoutAttached", true))
-        throw Win32Error("Expected Dormant state", ERROR_INVALID_DATA);
+        throw BridgeFailure("DETACH_PENDING", "Expected Dormant state: " + dormant.dump());
     if (progress) progress(dormant);
     auto report = nlohmann::json{{"attempt", attempt}, {"hello", hello},
         {"bootstrap", state}, {"detach", dormant}};
     if (inspectOnly) report["inspection"] = std::move(inspection);
     else report["layoutRejected"] = std::move(unsupported);
-    if (liveDurationSeconds) {
+    if (liveDurationSeconds || control) {
         report["attach"] = std::move(attached);
         report["leases"] = std::move(leaseStates);
         report["durationSeconds"] = liveDurationSeconds;
@@ -260,6 +269,7 @@ int RunProbeTarget(const std::wstring& readyEventName) {
 
 nlohmann::json RunBootstrapExperiment(const std::filesystem::path& imagePath) {
     const auto protocolTests = RunProtocolSelfTests();
+    const auto runtimeControlTests = RunRuntimeControlSelfTests();
     if (!IsNativeX64(GetCurrentProcess()))
         throw Win32Error("Self-test requires native x64", ERROR_BAD_EXE_FORMAT);
     const auto modulePath = imagePath.parent_path() / L"WorkFor.Taskbar.dll";
@@ -320,12 +330,13 @@ nlohmann::json RunBootstrapExperiment(const std::filesystem::path& imagePath) {
         {"dllSha256", dllHash}, {"target", Describe(target)},
         {"wrongIdentityRejected", rejectedWrongIdentity},
         {"protocolTests", protocolTests},
+        {"runtimeControlTests", runtimeControlTests},
         {"attempts", {first, second}}};
 }
 
 nlohmann::json RunExplorerExperiment(const std::filesystem::path& imagePath,
-    unsigned durationSeconds, HANDLE stopEvent = nullptr,
-    const std::function<void(const nlohmann::json&)>& progress = {}) {
+    unsigned durationSeconds, RuntimeControl* control = nullptr,
+    double initialWidth = 260.0, const std::function<void(const nlohmann::json&)>& progress = {}) {
     // Both research modes are explicit opt-in and file-exact gated. Duration 0
     // only inspects; a positive duration uses the separate fixed Live basename.
     auto targets = DiscoverTaskbars();
@@ -359,7 +370,7 @@ nlohmann::json RunExplorerExperiment(const std::filesystem::path& imagePath,
         throw Win32Error("UNSUPPORTED_BUILD: research taskbar fingerprint mismatch", ERROR_REVISION_MISMATCH);
 
     const auto modulePath = imagePath.parent_path() /
-        (durationSeconds ? L"WorkFor.Taskbar.Live.dll" : L"WorkFor.Taskbar.dll");
+        ((durationSeconds || control) ? L"WorkFor.Taskbar.Live.dll" : L"WorkFor.Taskbar.dll");
     const auto attributes = GetFileAttributesW(modulePath.c_str());
     if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_REPARSE_POINT))
         throw Win32Error("Missing or redirected sibling DLL", ERROR_FILE_NOT_FOUND);
@@ -377,15 +388,24 @@ nlohmann::json RunExplorerExperiment(const std::filesystem::path& imagePath,
     // Explorer copy is PINned and transitions to Dormant after its readonly dump.
     CurrentUserSecurity security;
     UniqueHandle activeMarker;
-    if (durationSeconds) {
+    if (durationSeconds || control) {
         activeMarker.reset(CreateMutexW(security.get(), FALSE, ActiveMutexName().c_str()));
         if (!activeMarker || GetLastError() == ERROR_ALREADY_EXISTS)
             throw Win32Error("Another active native module exists", ERROR_ALREADY_EXISTS);
     }
-    const auto result = RunOneAttempt(target, hook, module, RandomAttempt(), true,
-        durationSeconds, stopEvent, progress);
-    return {{"type", durationSeconds ? "explorer.liveExperiment" : "explorer.inspection"},
-        {"readOnly", durationSeconds == 0},
+    nlohmann::json result;
+    try {
+        result = RunOneAttempt(target, hook, module, RandomAttempt(), true,
+            durationSeconds, control, initialWidth, progress);
+    } catch (...) {
+        if (WaitForSingleObject(target.process.get(), 0) != WAIT_TIMEOUT)
+            throw BridgeFailure("EXPLORER_EXITED", "Target Explorer exited during native session", target.processId, target.creationTime);
+        if (!IsWindow(target.window))
+            throw BridgeFailure("TASKBAR_RECREATED", "Target taskbar disappeared during native session", target.processId, target.creationTime);
+        throw;
+    }
+    return {{"type", (durationSeconds || control) ? "explorer.liveExperiment" : "explorer.inspection"},
+        {"readOnly", durationSeconds == 0 && !control},
         {"productionExplorerHooked", true}, {"layoutAttached", false},
         {"taskbarSha256", fingerprint}, {"dllSha256", dllHash},
         {"target", Describe(target)}, {"result", result}};
@@ -395,18 +415,80 @@ nlohmann::json RunExplorerInspection(const std::filesystem::path& imagePath) {
     return RunExplorerExperiment(imagePath, 0);
 }
 
-nlohmann::json RunExplorerLiveExperiment(const std::filesystem::path& imagePath, unsigned durationSeconds) {
+nlohmann::json RunExplorerLiveExperiment(const std::filesystem::path& imagePath, unsigned durationSeconds, double widthDip) {
     if (!durationSeconds || durationSeconds > 300)
         throw std::invalid_argument("Live experiment duration must be 1..300 seconds");
-    return RunExplorerExperiment(imagePath, durationSeconds);
+    return RunExplorerExperiment(imagePath, durationSeconds, nullptr, widthDip);
 }
 
-nlohmann::json RunExplorerContinuous(const std::filesystem::path& imagePath) {
-    StdinLifetime owner;
-    return RunExplorerExperiment(imagePath, MAXDWORD, owner.stopped.get(),
-        [](const nlohmann::json& state) {
-            std::cout << nlohmann::json{{"type", "bridge.liveState"},
-                {"payload", state}}.dump() << std::endl;
-        });
+nlohmann::json RunExplorerContinuous(const std::filesystem::path& imagePath, double widthDip) {
+    RuntimeControl control(widthDip);
+    std::uint64_t retries{};
+    std::deque<ULONGLONG> recoveryTimes;
+    auto readinessDeadline = GetTickCount64() + 60'000;
+    auto busyDeadline = GetTickCount64() + 10'000;
+    auto emit = [](const nlohmann::json& state) {
+        const auto requestId = state.value("requestId", "");
+        const auto type = state.value("type", "") == "native.error" ? "bridge.commandError" :
+            (requestId.empty() ? "bridge.liveState" : "bridge.configureResult");
+        std::cout << nlohmann::json{{"type", type}, {"requestId", requestId},
+            {"payload", state}}.dump() << std::endl;
+    };
+    while (!control.Stopping()) {
+        try {
+            return RunExplorerExperiment(imagePath, 0, &control, widthDip, emit);
+        } catch (const BridgeFailure& failure) {
+            if (failure.code != "EXPLORER_EXITED" && failure.code != "TASKBAR_RECREATED") throw;
+            const auto now = GetTickCount64();
+            while (!recoveryTimes.empty() && now - recoveryTimes.front() > 10 * 60'000) recoveryTimes.pop_front();
+            recoveryTimes.push_back(now);
+            if (recoveryTimes.size() > 3)
+                throw BridgeFailure("RETRY_BUDGET_EXCEEDED", "Native recovery exceeded 3 events in 10 minutes");
+            ++retries;
+            readinessDeadline = now + 60'000;
+            busyDeadline = now + 10'000;
+            emit({{"state", "Reconnecting"}, {"code", failure.code},
+                {"layoutAttached", false}, {"retryCount", retries},
+                {"lastTargetProcessId", failure.targetProcessId},
+                {"lastTargetCreationTime", std::to_string(failure.targetCreationTime)}});
+        } catch (const Win32Error& failure) {
+            if (failure.code != ERROR_NOT_FOUND && failure.code != ERROR_INVALID_WINDOW_HANDLE &&
+                failure.code != ERROR_PROCESS_ABORTED && failure.code != ERROR_ALREADY_EXISTS) throw;
+            const auto now = GetTickCount64();
+            if (failure.code == ERROR_ALREADY_EXISTS && now >= busyDeadline)
+                throw BridgeFailure("NATIVE_COMPONENT_BUSY", "An active component did not finish cleanup within 10 seconds");
+            if (failure.code != ERROR_ALREADY_EXISTS && now >= readinessDeadline)
+                throw BridgeFailure("EXPLORER_NOT_READY", "Explorer was not ready within 60 seconds");
+            emit({{"state", "Reconnecting"}, {"code", failure.code == ERROR_ALREADY_EXISTS ? "NATIVE_COMPONENT_BUSY" : "EXPLORER_NOT_READY"},
+                {"layoutAttached", false}, {"retryCount", retries}});
+        }
+        for (const auto& notification : control.TakeNotifications())
+            std::cout << notification.dump() << std::endl;
+        control.Wait(1'000);
+    }
+    for (const auto& notification : control.TakeNotifications())
+        std::cout << notification.dump() << std::endl;
+    return {{"result", {{"detach", {{"state", "Dormant"}, {"layoutAttached", false}}}}}};
+}
+
+std::string ClassifyNativeFailure(const std::exception& error) {
+    if (const auto* failure = dynamic_cast<const BridgeFailure*>(&error)) return failure->code;
+    if (const auto* win32 = dynamic_cast<const Win32Error*>(&error)) {
+        switch (win32->code) {
+        case ERROR_REVISION_MISMATCH:
+            return std::string(error.what()).find("ABI") != std::string::npos ? "NATIVE_ABI_MISMATCH" : "UNSUPPORTED_BUILD";
+        case ERROR_ACCESS_DENIED:
+            return std::string(error.what()).find("IDENTITY") != std::string::npos ? "TARGET_IDENTITY_MISMATCH" : "LOAD_POLICY_BLOCKED";
+        case ERROR_ALREADY_EXISTS: return "NATIVE_COMPONENT_BUSY";
+        case ERROR_NOT_FOUND: return "EXPLORER_NOT_READY";
+        case ERROR_PROCESS_ABORTED: return "EXPLORER_EXITED";
+        case ERROR_TIMEOUT: return "NATIVE_HANDSHAKE_TIMEOUT";
+        case ERROR_BROKEN_PIPE: return "CONTROL_CHANNEL_LOST";
+        case ERROR_FILE_NOT_FOUND: return "NATIVE_BINARY_MISSING";
+        case ERROR_INVALID_DATA: return "NATIVE_PROTOCOL_ERROR";
+        default: return "NATIVE_START_FAILED";
+        }
+    }
+    return "NATIVE_START_FAILED";
 }
 }

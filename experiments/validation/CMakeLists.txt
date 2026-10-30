@@ -1,0 +1,27 @@
+cmake_minimum_required(VERSION 3.25)
+project(WorkForValidation LANGUAGES CXX)
+if(NOT WIN32 OR NOT MSVC)
+  message(FATAL_ERROR "Validation requires Windows x64 and MSVC.")
+endif()
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+get_filename_component(WORKFOR_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
+add_library(WorkFor.Validation.FakeTaskbar SHARED fake-taskbar.cpp)
+set_target_properties(WorkFor.Validation.FakeTaskbar PROPERTIES OUTPUT_NAME "Taskbar")
+add_executable(WorkFor.Validation.Native
+  native-validation.cpp
+  "${WORKFOR_ROOT}/src/WorkFor.Taskbar/Adapter.cpp"
+  "${WORKFOR_ROOT}/src/WorkFor.Taskbar/Compatibility.cpp")
+target_include_directories(WorkFor.Validation.Native PRIVATE "${WORKFOR_ROOT}/src/WorkFor.Taskbar")
+target_compile_definitions(WorkFor.Validation.Native PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
+target_compile_options(WorkFor.Validation.Native PRIVATE /W4 /utf-8 /permissive- /EHsc)
+target_link_libraries(WorkFor.Validation.Native PRIVATE user32 advapi32 bcrypt runtimeobject windowsapp version)
+target_link_options(WorkFor.Validation.Native PRIVATE "/MANIFEST:EMBED"
+  "/MANIFESTINPUT:${WORKFOR_ROOT}/experiments/taskbar/adapter-layout-test.manifest")
+add_dependencies(WorkFor.Validation.Native WorkFor.Validation.FakeTaskbar)
+enable_testing()
+foreach(case dynamic-widths narrow-root restore-local-values existing-binding unknown-layout wrong-thread unknown-fingerprint long-text font-enlargement theme-resources month-title activation)
+  add_test(NAME "validation-${case}" COMMAND WorkFor.Validation.Native "${case}")
+  set_tests_properties("validation-${case}" PROPERTIES TIMEOUT 20)
+endforeach()
