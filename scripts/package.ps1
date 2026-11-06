@@ -78,6 +78,12 @@ try {
         if ($taskProject.Name -eq 'UI' -and -not (Test-Path -LiteralPath (Join-Path $taskDestination 'WorkFor.UI.pri') -PathType Leaf)) {
             throw 'Published WinUI application resource index is missing; the packaged UI cannot start.'
         }
+        if ($taskProject.Name -eq 'UI') {
+            foreach ($taskEditorAsset in @('index.html','main.js','lsp/node.exe','lsp/node_modules/typescript/lib/tsserver.js',
+                'lsp/node_modules/typescript-language-server/lib/cli.mjs','lsp/node_modules/vscode-json-languageserver/bin/vscode-json-languageserver')) {
+                if (-not (Test-Path -LiteralPath (Join-Path $taskDestination "editor/$taskEditorAsset") -PathType Leaf)) { throw "Offline editor/LSP publish is incomplete: $taskEditorAsset" }
+            }
+        }
         $taskRuntimeConfig = Get-Content -Raw -LiteralPath (Join-Path $taskDestination "WorkFor.$($taskProject.Name).runtimeconfig.json") | ConvertFrom-Json
         $taskCoreRuntime = @($taskRuntimeConfig.runtimeOptions.includedFrameworks) | Where-Object { $_.name -eq 'Microsoft.NETCore.App' }
         if ($taskCoreRuntime.Count -ne 1 -or $taskCoreRuntime[0].version -ne '10.0.14') {
@@ -157,6 +163,10 @@ WorkFor uses .NET and Windows App SDK native/self-contained runtime distribution
 - Corvus.Text.Json.Validator: https://github.com/corvus-dotnet/Corvus.JsonSchema (Apache-2.0; package THIRD-PARTY-NOTICES and source LICENSE are preserved)
 - NodaTime: https://github.com/nodatime/nodatime (Apache-2.0; source LICENSE and NOTICE are preserved)
 - nlohmann/json: https://github.com/nlohmann/json (MIT)
+- Monaco Editor: https://github.com/microsoft/monaco-editor (MIT)
+- TypeScript Language Server: https://github.com/typescript-language-server/typescript-language-server (Apache-2.0)
+- TypeScript / JSON language server: Microsoft source and license files preserved under ui/editor/lsp/node_modules
+- Node.js: pinned runtime and its original license preserved under ui/editor/lsp
 
 The Setup executable uses NSIS 3.13 with zlib compression; its license texts are included. Build tools (CMake, MSVC, NSIS) are not required on the end-user machine. This distribution is unsigned; no signing certificate or signed status is claimed.
 '@

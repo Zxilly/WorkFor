@@ -35,4 +35,19 @@
       </ResolvedFileToPublish>
     </ItemGroup>
   </Target>
+  <Target Name="PrepareCodeEditor" BeforeTargets="PrepareForBuild">
+    <Exec Command="pwsh -NoProfile -File &quot;$(MSBuildProjectDirectory)/../../scripts/build-editor.ps1&quot;" />
+  </Target>
+  <Target Name="CopyCodeEditorOutput" AfterTargets="Build" DependsOnTargets="PrepareCodeEditor">
+    <ItemGroup>
+      <_EditorOutputFiles Include="$(MSBuildProjectDirectory)/../../out/editor/**/*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_EditorOutputFiles)" DestinationFiles="@(_EditorOutputFiles->'$(TargetDir)editor/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="PublishCodeEditor" AfterTargets="Publish" DependsOnTargets="PrepareCodeEditor">
+    <ItemGroup>
+      <_EditorPublishFiles Include="$(MSBuildProjectDirectory)/../../out/editor/**/*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_EditorPublishFiles)" DestinationFiles="@(_EditorPublishFiles->'$(PublishDir)editor/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
 </Project>

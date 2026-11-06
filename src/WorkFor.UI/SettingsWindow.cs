@@ -24,18 +24,18 @@ internal sealed class SettingsWindow : Window
     private readonly ComboBox _rulePicker = new() { Header = "计算方式", MinWidth = 300 };
     private readonly TextBox _currency = new() { Header = "币种", MaxLength = 3, Width = 260,
         HorizontalAlignment = HorizontalAlignment.Left };
-    private readonly TextBox _parameters = JsonEditor("规则参数（JSON）", 120);
+    private readonly CodeEditor _parameters = new("规则参数（JSON）", "parameters", 120);
     private readonly SchemaParameterForm _parameterForm = new();
     private readonly TextBlock _parameterFallback = WindowLayout.Label("", "CaptionTextBlockStyle");
     private readonly Expander _parametersExpander;
-    private readonly TextBox _source = JsonEditor("JavaScript 规则", 280);
-    private readonly TextBox _manifest = JsonEditor("规则清单与参数校验（JSON）", 240);
+    private readonly CodeEditor _source = new("JavaScript 规则", "script", 280);
+    private readonly CodeEditor _manifest = new("规则清单与参数校验（JSON）", "manifest", 240);
     private readonly Expander _manifestExpander;
     private readonly TextBox _timeZone = new() { Header = "时区", Text = "Asia/Shanghai", MinWidth = 300 };
     private readonly TextBox _weekdays = new() { Header = "计薪工作日", PlaceholderText = "1,2,3,4,5",
         Description = "周一为 1，周日为 7；多个日期用英文逗号分隔。", MinWidth = 300 };
-    private readonly TextBox _shifts = JsonEditor("计薪时段（JSON）", 160);
-    private readonly TextBox _dateOverrides = JsonEditor("日期覆盖（JSON）", 180);
+    private readonly CodeEditor _shifts = new("计薪时段（JSON）", "shifts", 160);
+    private readonly CodeEditor _dateOverrides = new("日期覆盖（JSON）", "dates", 180);
     private readonly NumberBox _width = new() { Header = "任务栏最大宽度（DIP）", Minimum = 180, Maximum = 360,
         SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Inline, Width = 300,
         HorizontalAlignment = HorizontalAlignment.Left };
@@ -61,7 +61,6 @@ internal sealed class SettingsWindow : Window
     {
         Title = "WorkFor 设置";
         SystemBackdrop = new MicaBackdrop();
-        _source.AcceptsReturn = true;
         _source.PlaceholderText = "可粘贴自定义入口脚本；留空使用当前规则。";
         _shifts.Description = "例如 [{\"start\":\"09:00\",\"end\":\"18:00\"}]。全天可用 start/end 均为 00:00 并设 endNextDay 为 true。";
         _dateOverrides.Description = "用日期覆盖当日的计薪计划。例如 {\"2026-10-01\": []} 表示当天不计薪；值也可填写计薪时段数组。";
@@ -79,11 +78,11 @@ internal sealed class SettingsWindow : Window
             try { _parameters.Text = parameters.ToJsonString(PrettyJson); }
             finally { _syncingParameters = false; }
         };
-        _parameters.TextChanged += (_, _) =>
+        _parameters.TextChanged += () =>
         {
             if (!_populating && !_syncingParameters) RefreshParameterForm();
         };
-        _manifest.TextChanged += (_, _) => { if (!_populating) RefreshParameterForm(); };
+        _manifest.TextChanged += () => { if (!_populating) RefreshParameterForm(); };
         _rulePicker.SelectionChanged += (_, _) =>
         {
             if (_populating || _rulePicker.SelectedItem is not ComboBoxItem { Tag: RuleCatalogItem rule }) return;
@@ -144,17 +143,12 @@ internal sealed class SettingsWindow : Window
             _liveSnapshot.Text = $"当前显示：{snapshot.Title} {snapshot.AmountText} · {snapshot.StatusText}";
             if (_config is null && !_busy) _ = LoadConfigurationAsync();
         });
-        Closed += async (_, _) => { _closed = true; await _client.DisposeAsync(); };
+        Closed += async (_, _) => { _closed = true; foreach (var editor in Editors) editor.Dispose(); await _client.DisposeAsync(); };
         _navigation.SelectedItem = _navigation.MenuItems[0];
         _ = LoadConfigurationAsync();
     }
 
-    private static TextBox JsonEditor(string header, double height) => new()
-    {
-        Header = header, AcceptsReturn = true, TextWrapping = TextWrapping.NoWrap,
-        FontFamily = new FontFamily("Consolas"), MinHeight = height, MaxHeight = 420,
-        HorizontalAlignment = HorizontalAlignment.Stretch, MinWidth = 440
-    };
+    private CodeEditor[] Editors => [_parameters, _source, _manifest, _shifts, _dateOverrides];
 
     private void ShowSection(string section)
     {
@@ -286,6 +280,8 @@ internal sealed class SettingsWindow : Window
             var manifest = JsonNode.Parse(_manifest.Text,
                 documentOptions: new JsonDocumentOptions { MaxDepth = 16 }) as JsonObject;
             var schema = manifest?["parametersSchema"];
+            _parameters.ParametersSchema = schema;
+            _source.ParametersSchema = schema;
             var key = schema?.ToJsonString() ?? "";
             if (_parameterSchemaKey == key && _parameterForm.Visibility == Visibility.Visible
                 && _parameterForm.UpdateParameters(parameters, out _)) return;
@@ -320,12 +316,14 @@ internal sealed class SettingsWindow : Window
 
     private async Task ValidateAsync()
     {
+        await FlushEditorsAsync("rules");
         await _client.RequestAsync("rule.validate", Candidate());
         Feedback("验证通过", "当前修改可应用，现有计算规则尚未改变。", InfoBarSeverity.Success);
     }
 
     private async Task PreviewAsync()
     {
+        await FlushEditorsAsync("rules");
         var result = await _client.RequestAsync("rule.preview", Candidate());
         _preview.Text = result.ToJsonString(PrettyJson);
         Feedback("预览完成", "此结果未改变当前活动规则。", InfoBarSeverity.Success);
@@ -335,6 +333,7 @@ internal sealed class SettingsWindow : Window
     {
         if (_config is null) throw new InvalidOperationException("尚未读取配置。");
         var section = _section;
+        await FlushEditorsAsync(section);
         var candidate = section switch
         {
             "calendar" => new JsonObject
@@ -407,11 +406,15 @@ internal sealed class SettingsWindow : Window
 
     private void SetActionsEnabled()
     {
+        foreach (var editor in Editors) editor.EditorReadOnly = _busy || _config is null;
         _navigation.IsEnabled = !_busy;
         foreach (var action in _actions) action.IsEnabled = !_busy && _config is not null;
         _rulePicker.IsEnabled = !_busy && _config is not null;
         _exitItem.IsEnabled = !_busy;
     }
+
+    private Task FlushEditorsAsync(string section) => Task.WhenAll((section == "calendar" ? new[] { _shifts, _dateOverrides }
+        : section == "rules" ? new[] { _parameters, _source, _manifest } : Array.Empty<CodeEditor>()).Select(editor => editor.FlushAsync()));
 
     private void Feedback(string title, string message, InfoBarSeverity severity)
     {
