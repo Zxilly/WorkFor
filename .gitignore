@@ -61,5 +61,6 @@ logs/
 !.vscode/launch.json
 Thumbs.db
 .DS_Store
+node_modules/
 
 # Keep dependency locks, authored rules, schemas and design sources tracked.

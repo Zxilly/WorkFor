@@ -1,0 +1,10 @@
+{
+  "name": "workfor-language-servers",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "typescript": "6.0.2",
+    "typescript-language-server": "6.0.3",
+    "vscode-json-languageserver": "1.3.4"
+  }
+}
