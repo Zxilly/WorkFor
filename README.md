@@ -7,6 +7,7 @@ Windows 11 原生任务栏实时收入显示。自带加载器，在系统托盘
 ## 功能
 
 - 内置时薪 / 月薪规则，自定义 JavaScript、参数和 Draft 2020-12 Schema。
+- 离线 Monaco 编辑 JSON / JavaScript；本地 LSP 提供 Schema 字段、`ctx`、规则参数和 SDK 补全、诊断及格式化。
 - 计薪工作日、午休、日期覆盖、跨午夜与时区。
 - 任务栏只显示收入标题和金额，异常时显示状态；原生浅深主题、字体缩放，空间不足时隐藏收入，不挤动应用图标。
 - 严格使用 Windows 原生风格：任务栏文字跟随系统时钟，设置和详情使用 WinUI 3 原生控件及系统资源，详见 [界面约束](DESIGN.md)。
@@ -55,6 +56,7 @@ WorkFor.exe --verify       校验发行文件，不启动应用
 - [自带任务栏组件](docs/自带任务栏组件.md)
 - [JavaScript API](docs/脚本API规范.md) 与 [类型声明](sdk/workfor-api.d.ts)
 - [依赖与构建](docs/依赖与构建.md)、[Schema 校验器说明](docs/schema-validator.md)
+- [代码编辑器与 LSP](docs/代码编辑器.md)
 - [发布与安装](installer/README.md)
 - [原生引导](experiments/native-bootstrap/README.md)、[布局研究](experiments/taskbar/research-notes.md)、[补充验证](experiments/validation/README.md)、[Host](experiments/host/README.md)、[WinUI](experiments/ui/README.md)
 

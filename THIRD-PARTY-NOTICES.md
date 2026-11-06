@@ -11,10 +11,17 @@ WorkFor 自有源码采用 [MIT](LICENSE)。第三方库、运行时和构建工
 | nlohmann/json | 3.12.0 | [MIT](https://github.com/nlohmann/json) |
 | .NET | 10.0.14 | [运行时源码与分发许可资料](https://github.com/dotnet/runtime) |
 | Windows App SDK | 2.6.4 | [源码与包内分发许可资料](https://github.com/microsoft/WindowsAppSDK) |
+| Monaco Editor | 0.57.0 | [MIT](https://github.com/microsoft/monaco-editor) |
+| TypeScript Language Server | 6.0.3 | [Apache-2.0](https://github.com/typescript-language-server/typescript-language-server) |
+| TypeScript | 6.0.2 | [Apache-2.0](https://github.com/microsoft/TypeScript) |
+| vscode-json-languageserver | 1.3.4 | [MIT](https://www.npmjs.com/package/vscode-json-languageserver) |
+| Node.js（LSP 随包运行时） | 26.13.0 | [原始分发许可](https://nodejs.org/dist/v26.13.0/) |
 | NSIS（安装器构建） | 3.13 | [zlib/libpng 等原始许可](https://nsis.sourceforge.io/Docs/AppendixI.html)，本项目使用 zlib 压缩 |
 
 `scripts/package.ps1` 会收集恢复依赖的 NuGet 元数据、包内许可 / NOTICE，以及固定上游提交的 BSD、MIT、Apache 许可文本；来源与 SHA256 固定。自包含运行时原有的许可资料也保留在各输出目录。
 
 发行包中的 `third-party`、`THIRD-PARTY-NOTICES.md` 和各运行时原始资料应一起分发，不能仅复制若干 EXE / DLL 后丢弃这些文件。
+
+Monaco、Acorn、marked 和 DOMPurify 的原始许可保存在 `ui/editor`；语言服务器、TypeScript 和完整传递依赖的许可保存在 `ui/editor/lsp/node_modules`，并附完整 npm 锁。Node 的原始分发许可保存在 `ui/editor/lsp/Node-LICENSE.txt`。esbuild 仅用于构建。
 
 早期设计中的 JsonSchema.Net / WiX 维护费二进制没有进入当前发行依赖，具体迁移说明见 [Schema 迁移](docs/schema-validator.md) 和 [安装说明](installer/README.md)。
