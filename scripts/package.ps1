@@ -75,6 +75,9 @@ try {
             $taskRuntimeArgument, '-p:PublishSingleFile=false', '-p:PublishTrimmed=false',
             "-p:Version=$Version", "-p:DirectoryBuildPropsPath=$taskPackageProps",
             '-o', $taskDestination, '--nologo')
+        if ($taskProject.Name -eq 'UI' -and -not (Test-Path -LiteralPath (Join-Path $taskDestination 'WorkFor.UI.pri') -PathType Leaf)) {
+            throw 'Published WinUI application resource index is missing; the packaged UI cannot start.'
+        }
         $taskRuntimeConfig = Get-Content -Raw -LiteralPath (Join-Path $taskDestination "WorkFor.$($taskProject.Name).runtimeconfig.json") | ConvertFrom-Json
         $taskCoreRuntime = @($taskRuntimeConfig.runtimeOptions.includedFrameworks) | Where-Object { $_.name -eq 'Microsoft.NETCore.App' }
         if ($taskCoreRuntime.Count -ne 1 -or $taskCoreRuntime[0].version -ne '10.0.14') {
