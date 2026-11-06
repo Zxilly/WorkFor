@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.26100.0</TargetPlatformMinVersion>
+    <WindowsSdkPackageVersion>10.0.28000.87</WindowsSdkPackageVersion>
+    <UseWinUI>true</UseWinUI><WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <WindowsAppSDKBootstrapInitialize>false</WindowsAppSDKBootstrapInitialize>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier><PlatformTarget>x64</PlatformTarget>
+    <ApplicationManifest>../../../src/WorkFor.UI/app.manifest</ApplicationManifest>
+    <RootNamespace>WorkFor.EditorProbe</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" />
+    <Compile Include="../../../src/WorkFor.UI/CodeEditor.cs" Link="CodeEditor.cs" />
+    <Compile Include="../../../src/WorkFor.UI/LanguageServerSession.cs" Link="LanguageServerSession.cs" />
+    <Compile Include="../../../src/WorkFor.UI/LanguageServerJob.cs" Link="LanguageServerJob.cs" />
+    <Compile Include="../../../src/WorkFor.UI/WindowLayout.cs" Link="WindowLayout.cs" />
+    <Compile Include="../FlyoutProbe/ProductApp.cs" Link="ProductApp.cs" />
+  </ItemGroup>
+  <Target Name="CopyEditorProbeAssets" AfterTargets="Build">
+    <Exec Command="pwsh -NoProfile -File &quot;$(MSBuildProjectDirectory)/../../../scripts/build-editor.ps1&quot;" />
+    <ItemGroup><_EditorFiles Include="$(MSBuildProjectDirectory)/../../../out/editor/**/*" /></ItemGroup>
+    <Copy SourceFiles="@(_EditorFiles)" DestinationFiles="@(_EditorFiles->'$(TargetDir)editor/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+</Project>

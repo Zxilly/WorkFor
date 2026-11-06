@@ -49,6 +49,9 @@ try {
         }
     }
     if ($Test) {
+        Push-Location (Join-Path $taskRoot 'src/WorkFor.Editor')
+        try { & npm.cmd test; if ($LASTEXITCODE -ne 0) { throw 'Editor projection regression checks failed.' } }
+        finally { Pop-Location }
         foreach ($taskProject in @('WorkFor.Core.Tests', 'WorkFor.ScriptHost.Tests', 'WorkFor.Host.Tests', 'WorkFor.Persistence.Tests', 'WorkFor.Validation.Tests')) {
             & $taskDotnet test --project "tests/$taskProject/$taskProject.csproj" -c $Configuration --no-build
             if ($LASTEXITCODE -ne 0) { throw "Tests failed: $taskProject" }
