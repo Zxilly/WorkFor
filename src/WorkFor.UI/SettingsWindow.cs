@@ -36,7 +36,7 @@ internal sealed class SettingsWindow : Window
         Description = "周一为 1，周日为 7；多个日期用英文逗号分隔。", MinWidth = 300 };
     private readonly TextBox _shifts = JsonEditor("计薪时段（JSON）", 160);
     private readonly TextBox _dateOverrides = JsonEditor("日期覆盖（JSON）", 180);
-    private readonly NumberBox _width = new() { Header = "任务栏请求宽度（DIP）", Minimum = 180, Maximum = 360,
+    private readonly NumberBox _width = new() { Header = "任务栏最大宽度（DIP）", Minimum = 180, Maximum = 360,
         SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Inline, Width = 300,
         HorizontalAlignment = HorizontalAlignment.Left };
     private readonly ToggleSwitch _startWithWindows = new() { Header = "登录时启动", OnContent = "开", OffContent = "关" };
@@ -170,7 +170,7 @@ internal sealed class SettingsWindow : Window
                 _page.Children.Add(Action("应用日历", ApplyAsync, primary: true));
                 break;
             case "taskbar":
-                Heading("任务栏", "收入显示与系统任务栏使用相同的主题和缩放。原生适配状态见诊断。");
+                Heading("任务栏", "收入区域按文字自动收窄，最大宽度限制长金额占用的空间。原生适配状态见诊断。");
                 Add(_width, _startWithWindows);
                 _page.Children.Add(Action("应用任务栏设置", ApplyAsync, primary: true));
                 break;

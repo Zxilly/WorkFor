@@ -23,22 +23,26 @@ ctest --test-dir out/validation-native -C Debug --output-on-failure
 
 本次本机原型实测使用已有 Visual Studio 2022 / MSVC 19.44、Windows SDK 26100；这是明确记录的原型工具链例外，不能据此声称已满足最新版发布工具链资格。
 
-## 原生 12 组
+## 原生 16 组
 
 | 用例 | 验证行为 |
 |---|---|
-| `dynamic-widths` | 180 / 360 / 260 DIP 在线调整，同时改变应用测量空间；NaN 和越界配置不生效 |
-| `narrow-root` | 450 / 300 / 200 DIP 窄容器折叠收入、释放其列宽；空间恢复后重新显示 |
+| `dynamic-widths` | 180 / 360 / 260 DIP 最大宽度在线调整，长文字按上限截断，应用测量宽度保持不变；NaN 和越界配置不生效 |
+| `narrow-root` | 300 / 240 / 200 DIP 窄容器折叠收入、释放其列宽；空间恢复后重新显示 |
 | `restore-local-values` | 逻辑移除恢复原零显式列及 attached property 的 UnsetValue，不写死默认值 |
 | `existing-binding` | 已绑定布局在变更前拒绝；原 binding 保留且继续响应其数据源 |
 | `unknown-layout` | 未识别结构不创建列、不添加控件 |
 | `wrong-thread` | 非所有者线程不能修改 XAML 文本 |
 | `unknown-fingerprint` | 自己进程装载原创模拟 Taskbar.dll，严格指纹准备拒绝，不触及私有 RVA |
 | `long-text` | 180 DIP 下长金额与较长状态的视觉矩形不相交 |
-| `font-enlargement` | 自己控件字体放大 1.5 / 2 倍后金额仍在 48 DIP 内；缩回后标题与状态恢复 |
+| `font-enlargement` | 自己控件字体放大 1.5 / 2 倍后金额仍在 48 DIP 内；缩回后标题恢复，正常状态文字保持隐藏 |
 | `theme-resources` | 真实框架资源从浅色到深色更换金额前景色 |
 | `month-title` | 本月标题贯穿文本和自动化名称，断连更新不回退为今日；过长标题拒绝 |
 | `activation` | 真实系统 ButtonAutomationPeer Invoke 触发激活，验证 DPI 与物理锚点，移除后不再触发 |
+| `stable-icon-positions` | 居中图标在 180 / 260 / 360 DIP 收入宽度下保持原位；图标拥挤或托盘变宽时隐藏收入，空间恢复后显示 |
+| `quiet-fresh-status` | 正常状态不显示“实时更新”，连接问题仍显示状态 |
+| `clock-typography` | 收入文字匹配相邻系统时钟的字体、字号及字重，时钟文字缩放变化时同步，移除不修改时钟 |
+| `content-width` | 短金额仅占文字与内边距所需宽度；金额变长时增长，缩短时恢复 |
 
 `fake-taskbar.cpp` 仅用于未知指纹测试。生成的 `Taskbar.dll` 必须停留在验证输出目录，不能被产品打包脚本递归收集到发行包。
 

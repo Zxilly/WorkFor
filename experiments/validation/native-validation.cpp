@@ -116,37 +116,53 @@ public:
     HWND Window() const { return window_; }
 };
 
+void ContentWidth() {
+    Fixture f;
+    f.Attach();
+    winrt::check_hresult(adapter::AdapterUpdate(L"¥119.78", L"实时更新"));
+    Layout(f.root, 800);
+    const auto compactWidth = f.Income().ActualWidth();
+    Check(compactWidth < 150, "short income still occupies a fixed wide taskbar region");
+    winrt::check_hresult(adapter::AdapterUpdate(L"¥123,456,789.78", L"实时更新"));
+    Layout(f.root, 800);
+    Check(f.Income().ActualWidth() > compactWidth, "income region does not grow with its text");
+    winrt::check_hresult(adapter::AdapterUpdate(L"¥119.78", L"实时更新"));
+    Layout(f.root, 800);
+    Check(std::abs(f.Income().ActualWidth() - compactWidth) < 0.1, "income region does not shrink back with its text");
+}
+
 void DynamicWidths() {
     Fixture f;
     f.Attach();
     std::wstring diagnostic;
     for (const auto width : {180.0, 360.0, 260.0}) {
         winrt::check_hresult(adapter::AdapterConfigure(width, diagnostic));
-        f.UpdateAndLayout(800);
-        Check(std::abs(f.Income().ActualWidth() - width) < 0.1, "configured native Button width not applied");
-        Check(std::abs(f.repeater.ActualWidth() - (800 - 120 - width)) < 0.1,
-            "configured income width did not reserve corresponding app space");
+        winrt::check_hresult(adapter::AdapterUpdate(std::wstring(80, L'8'), L"实时更新"));
+        Layout(f.root, 800);
+        Check(std::abs(f.Income().ActualWidth() - width) < 0.1, "configured maximum width did not cap long text");
+        Check(std::abs(f.repeater.ActualWidth() - 800) < 0.1,
+            "configured income width changed the native app layout");
     }
     Check(FAILED(adapter::AdapterConfigure(std::numeric_limits<double>::quiet_NaN(), diagnostic)), "NaN width accepted");
     Check(FAILED(adapter::AdapterConfigure(179, diagnostic)), "below-minimum width accepted");
     Check(FAILED(adapter::AdapterConfigure(361, diagnostic)), "above-maximum width accepted");
-    f.UpdateAndLayout(800);
+    Layout(f.root, 800);
     Check(std::abs(f.Income().ActualWidth() - 260) < 0.1, "invalid configuration changed active width");
 }
 
 void NarrowRoot() {
     Fixture f;
     f.Attach();
-    for (const auto width : {450.0, 300.0, 200.0}) {
+    for (const auto width : {300.0, 240.0, 200.0}) {
         f.UpdateAndLayout(width);
         Check(f.Income().Visibility() == Visibility::Collapsed, "income is still visible when taskbar has insufficient space");
         Check(std::abs(f.root.ColumnDefinitions().GetAt(1).ActualWidth()) < 0.1, "hidden income still occupies layout width");
-        Check(std::abs(f.repeater.ActualWidth() - std::max(0.0, width - 120)) < 0.1,
-            "collapsed income did not release its app space");
+        Check(std::abs(f.repeater.ActualWidth() - width) < 0.1,
+            "collapsed income changed the native app layout");
     }
     f.UpdateAndLayout(800);
     Check(f.Income().Visibility() == Visibility::Visible, "income did not restore after space returned");
-    Check(std::abs(f.repeater.ActualWidth() - 420) < 0.1, "restored income has wrong app width");
+    Check(std::abs(f.repeater.ActualWidth() - 800) < 0.1, "restored income changed native app width");
 }
 
 void RestoreLocalValues() {
@@ -229,6 +245,85 @@ winrt::Windows::Foundation::Rect Bounds(const FrameworkElement& element, const F
     return {p.X, p.Y, static_cast<float>(element.ActualWidth()), static_cast<float>(element.ActualHeight())};
 }
 
+void StableIconPositions() {
+    Fixture f;
+    Grid icons;
+    icons.Width(400);
+    icons.HorizontalAlignment(HorizontalAlignment::Center);
+    f.repeater.Children().Append(icons);
+    Layout(f.root, 1600);
+    const auto before = Bounds(icons, f.root);
+    std::wstring diagnostic;
+    winrt::check_hresult(adapter::AdapterAttachToRoot(f.root, 260, diagnostic));
+    for (const auto width : {180.0, 260.0, 360.0}) {
+        winrt::check_hresult(adapter::AdapterConfigure(width, diagnostic));
+        f.UpdateAndLayout(1600);
+        const auto after = Bounds(icons, f.root);
+        Check(std::abs(after.X - before.X) < 0.1, "income moved centered taskbar icons");
+        Check(std::abs(f.repeater.ActualWidth() - 1600) < 0.1, "income changed the native icon layout width");
+        Check(f.Income().Visibility() == Visibility::Visible, "income hidden despite sufficient unused space");
+    }
+    icons.Width(1400);
+    f.UpdateAndLayout(1600);
+    Check(f.Income().Visibility() == Visibility::Collapsed, "income covers crowded taskbar icons");
+    Check(std::abs(Bounds(icons, f.root).X - 100) < 0.1, "crowding changed native icon positioning");
+    icons.Width(400);
+    f.UpdateAndLayout(1600);
+    Check(f.Income().Visibility() == Visibility::Visible, "income did not return when unused space returned");
+    f.tray.Width(620);
+    f.UpdateAndLayout(1600);
+    Check(f.Income().Visibility() == Visibility::Collapsed, "income covers icons after tray expansion");
+    Check(std::abs(Bounds(icons, f.root).X - before.X) < 0.1, "tray expansion changed icon positioning");
+    f.tray.Width(120);
+    f.UpdateAndLayout(1600);
+    Check(f.Income().Visibility() == Visibility::Visible, "income did not return after tray contraction");
+    f.Detach();
+    Layout(f.root, 1600);
+    Check(std::abs(Bounds(icons, f.root).X - before.X) < 0.1, "detach changed icon positioning");
+}
+
+void QuietFreshStatus() {
+    Fixture f;
+    f.Attach();
+    f.UpdateAndLayout(800);
+    const auto content = f.Income().Content().as<Grid>();
+    for (const auto& child : content.Children())
+        if (const auto text = child.try_as<TextBlock>())
+            Check(text.Visibility() == Visibility::Collapsed || text.Text() != L"实时更新", "fresh status is still visible in the taskbar");
+    winrt::check_hresult(adapter::AdapterUpdate(L"¥128.60", L"连接中"));
+    Layout(f.root, 800);
+    bool errorVisible{};
+    for (const auto& child : content.Children())
+        if (const auto text = child.try_as<TextBlock>(); text && text.Text() == L"连接中")
+            errorVisible = text.Visibility() == Visibility::Visible;
+    Check(errorVisible, "connection problems no longer have a visible status");
+}
+
+void ClockTypography() {
+    Fixture f;
+    TextBlock clock;
+    clock.Name(L"TimeInnerTextBlock");
+    clock.Text(L"17:30");
+    clock.FontFamily(winrt::Windows::UI::Xaml::Media::FontFamily(L"Segoe UI Variable Text"));
+    clock.FontSize(14);
+    clock.FontWeight(winrt::Windows::UI::Text::FontWeight{600});
+    f.tray.Children().Append(clock);
+    Island island(f.root);
+    f.Attach();
+    const auto content = f.Income().Content().as<Grid>();
+    for (const auto size : {14.0, 20.0}) {
+        clock.FontSize(size);
+        f.UpdateAndLayout(800);
+        for (const auto& child : content.Children()) if (const auto text = child.try_as<TextBlock>()) {
+            Check(text.FontSize() == clock.FontSize(), "income typography does not follow Windows clock text scaling");
+            Check(text.FontFamily().Source() == clock.FontFamily().Source(), "income font differs from the Windows clock");
+            Check(text.FontWeight().Weight == clock.FontWeight().Weight, "income font weight differs from the Windows clock");
+        }
+    }
+    f.Detach();
+    Check(clock.FontSize() == 20 && clock.FontWeight().Weight == 600, "income changed the Windows clock typography");
+}
+
 void LongText() {
     Fixture f;
     f.Attach(180);
@@ -267,8 +362,8 @@ void FontEnlargement() {
     }
     for (size_t i = 0; i < text.size(); ++i) text[i].FontSize(original[i]);
     f.UpdateAndLayout(800);
-    Check(text[0].Visibility() == Visibility::Visible && text[2].Visibility() == Visibility::Visible,
-        "caption/status did not return after font size returned to normal");
+    Check(text[0].Visibility() == Visibility::Visible && text[2].Visibility() == Visibility::Collapsed,
+        "caption did not return or fresh status became visible after font size returned to normal");
 }
 
 void ThemeResources() {
@@ -362,7 +457,9 @@ int main(int argc, char** argv) {
             {"restore-local-values", RestoreLocalValues}, {"existing-binding", ExistingBinding}, {"unknown-layout", UnknownLayout},
             {"wrong-thread", WrongThread}, {"unknown-fingerprint", UnknownFingerprint},
             {"long-text", LongText}, {"font-enlargement", FontEnlargement},
-            {"theme-resources", ThemeResources}, {"month-title", MonthTitle}, {"activation", Activation}
+            {"theme-resources", ThemeResources}, {"month-title", MonthTitle}, {"activation", Activation},
+            {"stable-icon-positions", StableIconPositions}, {"quiet-fresh-status", QuietFreshStatus},
+            {"clock-typography", ClockTypography}, {"content-width", ContentWidth}
         };
         bool ran = false;
         for (const auto& test : cases) if (name == test.first) { test.second(); ran = true; }

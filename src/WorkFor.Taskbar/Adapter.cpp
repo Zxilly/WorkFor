@@ -82,6 +82,8 @@ struct Lease {
     TextBlock status{nullptr};
     TextBlock label{nullptr};
     TextBlock headingProbe{nullptr};
+    TextBlock amountProbe{nullptr};
+    TextBlock statusProbe{nullptr};
     struct Change {
         winrt::weak_ref<FrameworkElement> element;
         int before{}; int applied{}; bool span{};
@@ -91,11 +93,6 @@ struct Lease {
     FrameworkElement repeater{nullptr};
     FrameworkElement tray{nullptr};
     double requestedWidth{};
-    double originalRepeaterWidth{NAN};
-    double appliedRepeaterWidth{NAN};
-    HorizontalAlignment originalRepeaterAlignment{};
-    winrt::Windows::Foundation::IInspectable repeaterWidthLocal{nullptr};
-    winrt::Windows::Foundation::IInspectable repeaterAlignmentLocal{nullptr};
     winrt::event_token layoutToken{};
     bool updating{};
     bool implicitRoot{};
@@ -143,36 +140,81 @@ bool HasName(FrameworkElement element, const wchar_t* name) {
     return element && element.Name() == name;
 }
 
+void UseClockTypography(const FrameworkElement& tray, const std::vector<TextBlock>& text) {
+    for (const auto& node : Walk(tray)) {
+        const auto clock = node.element.try_as<TextBlock>();
+        if (!clock || !HasName(clock, L"TimeInnerTextBlock")) continue;
+        // Bind to the actual Windows clock so system text scaling and changes
+        // to the shell's typography continue to apply while we are attached.
+        const std::pair<const wchar_t*, DependencyProperty> properties[] = {
+            {L"FontFamily", TextBlock::FontFamilyProperty()},
+            {L"FontSize", TextBlock::FontSizeProperty()},
+            {L"FontWeight", TextBlock::FontWeightProperty()},
+            {L"FontStyle", TextBlock::FontStyleProperty()},
+            {L"FontStretch", TextBlock::FontStretchProperty()},
+            {L"CharacterSpacing", TextBlock::CharacterSpacingProperty()}
+        };
+        for (const auto& block : text) for (const auto& property : properties) {
+            winrt::Windows::UI::Xaml::Data::Binding binding;
+            binding.Source(clock);
+            binding.Path(PropertyPath(property.first));
+            binding.Mode(winrt::Windows::UI::Xaml::Data::BindingMode::OneWay);
+            block.SetBinding(property.second, binding);
+        }
+        return;
+    }
+}
+
+winrt::Windows::Foundation::Size MeasureText(const TextBlock& text, const TextBlock& probe) {
+    probe.Text(text.Text());
+    probe.FontFamily(text.FontFamily());
+    probe.FontSize(text.FontSize());
+    probe.FontWeight(text.FontWeight());
+    probe.FontStyle(text.FontStyle());
+    probe.FontStretch(text.FontStretch());
+    probe.CharacterSpacing(text.CharacterSpacing());
+    probe.Measure({INFINITY, INFINITY});
+    return probe.DesiredSize();
+}
+
 void RefreshWidth(Lease& lease) {
     if (lease.updating) return;
     lease.updating = true;
     try {
         const auto total = lease.parent.ActualWidth();
         const auto tray = lease.tray.ActualWidth();
-        const auto visible = total >= lease.requestedWidth + tray + 120.0;
-        lease.button.Visibility(visible ? Visibility::Visible : Visibility::Collapsed);
-        lease.column.Width({visible ? lease.requestedWidth : 0.0, GridUnitType::Pixel});
-        if (visible && lease.button.ActualHeight() > 0 && lease.headingProbe) {
-            // Measure a nonvisual copy even when the caption is collapsed, so
-            // reducing system text size can restore the caption automatically.
-            lease.headingProbe.FontSize(lease.label.FontSize());
-            lease.headingProbe.FontFamily(lease.label.FontFamily());
-            lease.headingProbe.Measure({INFINITY, INFINITY});
-            const auto headingHeight = lease.headingProbe.DesiredSize().Height;
-            const auto amountHeight = std::max<double>(lease.amount.DesiredSize().Height, lease.amount.ActualHeight());
-            const bool captionFits = headingHeight + amountHeight + 2.0 <= lease.button.ActualHeight();
-            lease.label.Visibility(captionFits ? Visibility::Visible : Visibility::Collapsed);
-            lease.status.Visibility(captionFits ? Visibility::Visible : Visibility::Collapsed);
-            lease.amount.Margin({0, captionFits ? 2.0 : 0.0, 0, 0});
-        }
-        if (lease.repeater && lease.ownedColumns.size() == 3) {
-            const auto available = std::max(0.0, total - tray - (visible ? lease.requestedWidth : 0.0));
-            if (!std::isfinite(lease.appliedRepeaterWidth) ||
-                std::abs(lease.appliedRepeaterWidth - available) > 0.1) {
-                lease.repeater.Width(available);
-                lease.appliedRepeaterWidth = available;
+        const auto heading = MeasureText(lease.label, lease.headingProbe);
+        const auto amount = MeasureText(lease.amount, lease.amountProbe);
+        const auto status = MeasureText(lease.status, lease.statusProbe);
+        const auto height = lease.parent.ActualHeight();
+        const bool captionFits = heading.Height + amount.Height + 2.0 <= height;
+        const bool statusVisible = captionFits && !lease.status.Text().empty();
+        const auto headingWidth = captionFits ? heading.Width + (statusVisible ? 6.0 + status.Width : 0.0) : 0.0;
+        const auto width = std::clamp(std::ceil(std::max<double>(amount.Width, headingWidth) + 24.0), 48.0, lease.requestedWidth);
+        lease.button.Width(width);
+        lease.content.Width(width);
+        lease.status.MaxWidth(std::max(0.0, (width - 24.0) * 0.6));
+        lease.label.Visibility(captionFits ? Visibility::Visible : Visibility::Collapsed);
+        lease.status.Visibility(statusVisible ? Visibility::Visible : Visibility::Collapsed);
+        lease.amount.Margin({0, captionFits ? 2.0 : 0.0, 0, 0});
+        bool visible = total >= width + tray + 120.0;
+        if (visible && lease.implicitRoot) {
+            // Keep Explorer's full-width icon layout intact. Use only its unused
+            // space before the tray, and yield when realized app buttons reach it.
+            const auto left = total - tray - width;
+            const auto right = total - tray;
+            const auto count = VisualTreeHelper::GetChildrenCount(lease.repeater);
+            if (count > 1024) visible = false;
+            for (int index = 0; visible && index < count; ++index) {
+                const auto child = VisualTreeHelper::GetChild(lease.repeater, index).try_as<FrameworkElement>();
+                if (!child || child.Visibility() == Visibility::Collapsed || child.ActualWidth() <= 0 || child.ActualHeight() <= 0) continue;
+                const auto point = child.TransformToVisual(lease.parent).TransformPoint({0, 0});
+                if (point.X < right && point.X + child.ActualWidth() + 8.0 > left)
+                    visible = false;
             }
         }
+        lease.button.Visibility(visible ? Visibility::Visible : Visibility::Collapsed);
+        lease.column.Width({visible ? width : 0.0, GridUnitType::Pixel});
     } catch (...) {}
     lease.updating = false;
 }
@@ -189,9 +231,6 @@ HRESULT AdapterConfigure(double widthDip, std::wstring& diagnostic) noexcept {
             diagnostic = L"WIDTH_OUT_OF_RANGE"; return E_INVALIDARG;
         }
         lease->requestedWidth = widthDip;
-        lease->button.Width(widthDip);
-        lease->content.Width(widthDip);
-        lease->status.MaxWidth(std::max(48.0, (widthDip - 24.0) * 0.45));
         RefreshWidth(*lease);
         lease->parent.InvalidateMeasure();
         lease->parent.UpdateLayout();
@@ -260,8 +299,8 @@ HRESULT AdapterAttachToRoot(const FrameworkElement& root, double widthDip, std::
         if (!std::isfinite(widthDip) || widthDip < 180 || widthDip > 360) return E_INVALIDARG;
         if (!root || !root.Dispatcher().HasThreadAccess()) return RPC_E_WRONG_THREAD;
 
-        // Both accepted shapes reserve real layout width. The exact Explorer
-        // research shape has a top-level implicit Grid, with Frame + Tray siblings.
+        // The exact Explorer shape keeps Frame spanning the full taskbar. Our
+        // column uses the blank space before Tray without constraining its icons.
         Grid rootGrid{nullptr};
         FrameworkElement tray{nullptr};
         FrameworkElement frame{nullptr};
@@ -354,9 +393,11 @@ HRESULT AdapterAttachToRoot(const FrameworkElement& root, double widthDip, std::
         label.TextTrimming(TextTrimming::CharacterEllipsis);
         lease->headingProbe = TextBlock{};
         lease->headingProbe.Text(L"今日收入");
+        lease->amountProbe = TextBlock{};
+        lease->statusProbe = TextBlock{};
         lease->amount = TextBlock{};
         lease->amount.Text(L"--");
-        lease->amount.FontSize(16);
+        lease->amount.FontSize(12);
         lease->amount.Margin({0, 2, 0, 0});
         lease->amount.TextTrimming(TextTrimming::CharacterEllipsis);
         lease->amount.TextWrapping(TextWrapping::NoWrap);
@@ -364,7 +405,7 @@ HRESULT AdapterAttachToRoot(const FrameworkElement& root, double widthDip, std::
         Grid::SetColumnSpan(lease->amount, 2);
         lease->status = TextBlock{};
         lease->status.Text(L"连接中");
-        lease->status.FontSize(10);
+        lease->status.FontSize(12);
         lease->status.HorizontalAlignment(HorizontalAlignment::Right);
         lease->status.VerticalAlignment(VerticalAlignment::Center);
         lease->status.MaxWidth(std::max(48.0, (widthDip - 24.0) * 0.45));
@@ -374,7 +415,9 @@ HRESULT AdapterAttachToRoot(const FrameworkElement& root, double widthDip, std::
         lease->content.Children().Append(label);
         lease->content.Children().Append(lease->amount);
         lease->content.Children().Append(lease->status);
+        UseClockTypography(tray, {label, lease->amount, lease->status});
         lease->button = Button{};
+        lease->button.MinWidth(0);
         lease->button.Name(L"WorkForIncomeRegion");
         lease->button.Width(widthDip);
         lease->button.Padding({0, 0, 0, 0});
@@ -402,10 +445,6 @@ HRESULT AdapterAttachToRoot(const FrameworkElement& root, double widthDip, std::
             lease->repeater = repeater;
             lease->tray = tray;
             lease->requestedWidth = widthDip;
-            lease->originalRepeaterWidth = repeater.Width();
-            lease->originalRepeaterAlignment = repeater.HorizontalAlignment();
-            lease->repeaterWidthLocal = repeater.ReadLocalValue(FrameworkElement::WidthProperty());
-            lease->repeaterAlignmentLocal = repeater.ReadLocalValue(FrameworkElement::HorizontalAlignmentProperty());
         } else {
             for (const auto& child : rootGrid.Children()) {
                 const auto element = child.as<FrameworkElement>();
@@ -428,20 +467,10 @@ HRESULT AdapterAttachToRoot(const FrameworkElement& root, double widthDip, std::
                 }
             }
         }
-        if (implicitRoot && (repeater.GetBindingExpression(FrameworkElement::WidthProperty()) ||
-            repeater.GetBindingExpression(FrameworkElement::HorizontalAlignmentProperty()) ||
-            (lease->repeaterWidthLocal != DependencyProperty::UnsetValue() &&
-                !lease->repeaterWidthLocal.try_as<winrt::Windows::Foundation::IPropertyValue>()) ||
-            (lease->repeaterAlignmentLocal != DependencyProperty::UnsetValue() &&
-                !lease->repeaterAlignmentLocal.try_as<winrt::Windows::Foundation::IPropertyValue>()))) {
-            diagnostic = L"UNSUPPORTED_LAYOUT: bound app layout properties are not modified";
-            return HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
-        }
         CurrentLease() = std::move(lease);
         try {
             if (implicitRoot) {
                 for (const auto& column : CurrentLease()->ownedColumns) rootGrid.ColumnDefinitions().Append(column);
-                repeater.HorizontalAlignment(HorizontalAlignment::Left);
             } else rootGrid.ColumnDefinitions().InsertAt(slot, CurrentLease()->column);
             for (const auto& change : CurrentLease()->changes) {
                 if (const auto element = change.element.get()) {
@@ -457,7 +486,7 @@ HRESULT AdapterAttachToRoot(const FrameworkElement& root, double widthDip, std::
             CurrentLease()->layoutToken = rootGrid.LayoutUpdated([](auto&&, auto&&) {
                 if (CurrentLease()) RefreshWidth(*CurrentLease());
             });
-            diagnostic = L"EXPERIMENTAL_COLUMN_ATTACHED; crowding/overflow qualification still pending";
+            diagnostic = L"UNUSED_SPACE_ATTACHED; native icon positioning preserved";
             return S_OK;
         } catch (...) {
             const auto error = winrt::to_hresult();
@@ -481,7 +510,8 @@ HRESULT AdapterUpdate(const std::wstring& amount, const std::wstring& status,
             lease->headingProbe.Text(title);
         }
         lease->amount.Text(amount);
-        lease->status.Text(status);
+        lease->status.Text(status == L"实时更新" ? L"" : status);
+        lease->status.Visibility(lease->status.Text().empty() ? Visibility::Collapsed : Visibility::Visible);
         winrt::Windows::UI::Xaml::Automation::AutomationProperties::SetName(
             lease->button, std::wstring(lease->label.Text().c_str()) + L" " + amount + L"，" + status + L"，打开收入详情");
         RefreshWidth(*lease);
@@ -522,12 +552,6 @@ HRESULT AdapterDetach(std::wstring& diagnostic) noexcept {
                     return HRESULT_FROM_WIN32(ERROR_BUSY);
                 }
             }
-            if (lease->repeater.HorizontalAlignment() != HorizontalAlignment::Left ||
-                (std::isfinite(lease->appliedRepeaterWidth) &&
-                 std::abs(lease->repeater.Width() - lease->appliedRepeaterWidth) > 0.1)) {
-                diagnostic = L"DETACH_PENDING: app layout constraint changed";
-                return HRESULT_FROM_WIN32(ERROR_BUSY);
-            }
         }
         if (lease->layoutToken.value) lease->parent.LayoutUpdated(lease->layoutToken);
         uint32_t contentIndex{};
@@ -542,12 +566,6 @@ HRESULT AdapterDetach(std::wstring& diagnostic) noexcept {
             }
         }
         if (lease->implicitRoot) {
-            if (lease->repeaterWidthLocal == DependencyProperty::UnsetValue())
-                lease->repeater.ClearValue(FrameworkElement::WidthProperty());
-            else lease->repeater.SetValue(FrameworkElement::WidthProperty(), lease->repeaterWidthLocal);
-            if (lease->repeaterAlignmentLocal == DependencyProperty::UnsetValue())
-                lease->repeater.ClearValue(FrameworkElement::HorizontalAlignmentProperty());
-            else lease->repeater.SetValue(FrameworkElement::HorizontalAlignmentProperty(), lease->repeaterAlignmentLocal);
             lease->parent.ColumnDefinitions().Clear();
         } else lease->parent.ColumnDefinitions().RemoveAt(columnIndex);
         lease->parent.InvalidateMeasure();

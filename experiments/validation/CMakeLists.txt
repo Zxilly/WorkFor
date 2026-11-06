@@ -21,7 +21,7 @@ target_link_options(WorkFor.Validation.Native PRIVATE "/MANIFEST:EMBED"
   "/MANIFESTINPUT:${WORKFOR_ROOT}/experiments/taskbar/adapter-layout-test.manifest")
 add_dependencies(WorkFor.Validation.Native WorkFor.Validation.FakeTaskbar)
 enable_testing()
-foreach(case dynamic-widths narrow-root restore-local-values existing-binding unknown-layout wrong-thread unknown-fingerprint long-text font-enlargement theme-resources month-title activation)
+foreach(case dynamic-widths narrow-root restore-local-values existing-binding unknown-layout wrong-thread unknown-fingerprint long-text font-enlargement theme-resources month-title activation stable-icon-positions quiet-fresh-status clock-typography content-width)
   add_test(NAME "validation-${case}" COMMAND WorkFor.Validation.Native "${case}")
   set_tests_properties("validation-${case}" PROPERTIES TIMEOUT 20)
 endforeach()

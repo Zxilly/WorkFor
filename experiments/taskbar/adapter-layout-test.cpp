@@ -61,11 +61,12 @@ int main() {
             Require(incomeButton && incomeButton.IsTabStop(), "income region is not a keyboard-focusable native Button");
             Require(!winrt::Windows::UI::Xaml::Automation::AutomationProperties::GetName(incomeButton).empty(),
                 "income region has no accessible name");
-            Require(std::abs((before - after) - 260) < 0.01, "income region did not reserve real layout width");
+            Require(std::abs((before - after) - incomeButton.ActualWidth()) < 0.01, "income region did not reserve its measured layout width");
+            Require(incomeButton.ActualWidth() < 260, "short text still occupies the maximum width");
             Require(std::abs(tray.ActualWidth() - 120) < 0.01, "tray width changed");
             winrt::check_hresult(workfor::taskbar::AdapterUpdate(L"¥128.61", L"实时更新"));
             Layout(root, 500);
-            Require(std::abs(apps.ActualWidth() - 120) < 0.01, "constrained app region did not shrink with layout");
+            Require(std::abs(apps.ActualWidth() - (500 - 120 - incomeButton.ActualWidth())) < 0.01, "constrained app region did not account for measured income width");
             winrt::check_hresult(workfor::taskbar::AdapterDetach(diagnostic));
             Layout(root, 800);
             Require(root.ColumnDefinitions().Size() == 2, "owned column not removed");
@@ -82,7 +83,7 @@ int main() {
 
             // Match the observed Windows 11 shape: implicit outer Grid has
             // Frame + Tray overlay siblings. Keep full-width Frame/background,
-            // reserve columns for income/tray, constrain only the app repeater.
+            // use blank space before the tray without constraining app icons.
             Grid outer;
             Grid frame;
             frame.Name(L"TaskbarFrame");
@@ -100,11 +101,11 @@ int main() {
             Layout(outer, 800);
             Require(outer.ColumnDefinitions().Size() == 3, "implicit root columns missing");
             Require(std::abs(frame.ActualWidth() - 800) < 0.01, "background/frame no longer full width");
-            Require(std::abs(repeater.ActualWidth() - 420) < 0.01, "repeater did not reserve income and tray width");
+            Require(std::abs(repeater.ActualWidth() - 800) < 0.01, "income changed native repeater width");
             Layout(outer, 600);
             winrt::check_hresult(workfor::taskbar::AdapterUpdate(L"--", L"连接中"));
             Layout(outer, 600);
-            Require(std::abs(repeater.ActualWidth() - 220) < 0.01, "repeater did not respond to layout resize");
+            Require(std::abs(repeater.ActualWidth() - 600) < 0.01, "native repeater did not retain full width after resize");
             winrt::check_hresult(workfor::taskbar::AdapterDetach(diagnostic));
             Layout(outer, 800);
             Require(outer.ColumnDefinitions().Size() == 0, "implicit columns not restored");
