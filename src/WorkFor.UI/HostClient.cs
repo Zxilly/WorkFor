@@ -23,6 +23,11 @@ internal sealed class HostClient : IAsyncDisposable
     private static readonly JsonSerializerOptions Json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     private long _requestSequence;
     private int _disposed;
+    private DisplaySnapshot? _latestSnapshot;
+    private string _connectionStatus = "正在连接计算宿主";
+
+    public DisplaySnapshot? LatestSnapshot => Volatile.Read(ref _latestSnapshot);
+    public string ConnectionStatus => Volatile.Read(ref _connectionStatus);
 
     public event Action<DisplaySnapshot>? SnapshotReceived;
     public event Action<string>? ConnectionChanged;
@@ -80,7 +85,7 @@ internal sealed class HostClient : IAsyncDisposable
         {
             try
             {
-                ConnectionChanged?.Invoke("正在连接计算宿主");
+                SetConnectionStatus("正在连接计算宿主");
                 await using var pipe = NewPipe("display");
                 await pipe.ConnectAsync(2500, _stop.Token);
                 await WriteFrameAsync(pipe, new JsonObject
@@ -105,15 +110,16 @@ internal sealed class HostClient : IAsyncDisposable
                     if (generation == incoming.Generation && incoming.Sequence <= sequence) continue;
                     generation = incoming.Generation;
                     sequence = incoming.Sequence;
+                    Volatile.Write(ref _latestSnapshot, incoming);
                     SnapshotReceived?.Invoke(incoming);
-                    ConnectionChanged?.Invoke("");
+                    SetConnectionStatus("");
                 }
             }
             catch (OperationCanceledException) when (_stop.IsCancellationRequested) { return; }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException or TimeoutException or OperationCanceledException
                 or JsonException or InvalidDataException or InvalidOperationException)
             {
-                ConnectionChanged?.Invoke("未连接计算宿主，正在重试");
+                SetConnectionStatus("未连接计算宿主，正在重试");
             }
             try { await Task.Delay(retry, _stop.Token); }
             catch (OperationCanceledException) { return; }
@@ -123,6 +129,12 @@ internal sealed class HostClient : IAsyncDisposable
 
     private NamedPipeClientStream NewPipe(string channel) => new(".", _pipeName(channel),
         PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+
+    private void SetConnectionStatus(string status)
+    {
+        Volatile.Write(ref _connectionStatus, status);
+        ConnectionChanged?.Invoke(status);
+    }
 
     private static async Task<JsonObject> ReadFrameAsync(Stream stream, int limit, CancellationToken cancellationToken)
     {

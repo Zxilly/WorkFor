@@ -85,6 +85,7 @@ internal static class Program
             hub.Start();
             runtime.PublishPersisted();
             native.Start();
+            runtime.WarmUi();
             Console.Error.WriteLine("WorkFor 计算宿主已启动；每秒根据绝对时刻重新计算。Ctrl+C 退出。");
             try { await runtime.RunAsync(stop.Token); }
             finally { await native.DisposeAsync(); await runtime.FlushSnapshotAsync(); }
@@ -316,6 +317,21 @@ internal sealed class HostRuntime(ConfigurationStore configuration, ScriptProces
     }
 
     public void OpenDetails(JsonObject payload) => OpenDetails(payload, settings: false);
+
+    public void WarmUi()
+    {
+        if (!File.Exists(ui)) return;
+        try
+        {
+            var info = new ProcessStartInfo(Path.GetFullPath(ui)) { UseShellExecute = false, CreateNoWindow = true };
+            info.ArgumentList.Add("--warm");
+            info.ArgumentList.Add("--host-pid");
+            info.ArgumentList.Add(Environment.ProcessId.ToString(CultureInfo.InvariantCulture));
+            Process.Start(info)?.Dispose();
+        }
+        catch (Exception error) when (error is IOException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        { Console.Error.WriteLine("WorkFor UI 预热未完成，将在点击时启动。"); }
+    }
 
     private void OpenDetails(JsonObject payload, bool settings)
     {

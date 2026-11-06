@@ -10,7 +10,7 @@ namespace WorkFor.UI;
 
 internal sealed class DetailsWindow : Window
 {
-    private readonly HostClient _client = new();
+    private readonly HostClient _client;
     private readonly TextBlock _title = WindowLayout.Label("收入", "SubtitleTextBlockStyle");
     private readonly TextBlock _amount = WindowLayout.Label("--", "TitleLargeTextBlockStyle");
     private readonly TextBlock _status = WindowLayout.Label("正在连接计算宿主", "CaptionTextBlockStyle");
@@ -23,9 +23,12 @@ internal sealed class DetailsWindow : Window
     private readonly InfoBar _error = new() { IsClosable = false, Severity = InfoBarSeverity.Error, Title = "计算失败" };
     private readonly Grid _rateRow;
     private DisplaySnapshot? _last;
+    private bool _activated;
+    private bool _closed;
 
-    public DetailsWindow(RectInt32? anchor = null)
+    public DetailsWindow(RectInt32? anchor = null, HostClient? client = null)
     {
+        _client = client ?? new HostClient();
         Title = "WorkFor · 收入详情";
         SystemBackdrop = new DesktopAcrylicBackdrop();
         var body = new StackPanel { Padding = new Thickness(24), Spacing = 12 };
@@ -71,12 +74,34 @@ internal sealed class DetailsWindow : Window
         Content = new ScrollViewer { Content = body, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
         body.KeyDown += OnKeyDown;
         WindowLayout.Configure(this, 380, 420, compact: true, anchor);
-        _client.SnapshotReceived += snapshot => DispatcherQueue.TryEnqueue(() => ShowSnapshot(snapshot));
-        _client.ConnectionChanged += state => DispatcherQueue.TryEnqueue(() => ShowConnection(state));
-        Closed += async (_, _) => await _client.DisposeAsync();
+        Activated += (_, activation) =>
+        {
+            if (activation.WindowActivationState != WindowActivationState.Deactivated) _activated = true;
+            else if (_activated && !_closed) Dismiss();
+        };
+        _client.SnapshotReceived += snapshot => DispatcherQueue.TryEnqueue(() => { if (!_closed) ShowSnapshot(snapshot); });
+        _client.ConnectionChanged += state => DispatcherQueue.TryEnqueue(() => { if (!_closed) ShowConnection(state); });
+        Closed += async (_, _) => { _closed = true; await _client.DisposeAsync(); };
+        RefreshLatest();
     }
 
-    internal void MoveToAnchor(RectInt32? anchor) => WindowLayout.Configure(this, 380, 420, compact: true, anchor);
+    internal void MoveToAnchor(RectInt32? anchor)
+    {
+        RefreshLatest();
+        WindowLayout.Configure(this, 380, 420, compact: true, anchor);
+    }
+
+    private void RefreshLatest()
+    {
+        if (_client.LatestSnapshot is { } snapshot) ShowSnapshot(snapshot);
+        ShowConnection(_client.ConnectionStatus);
+    }
+
+    private void Dismiss()
+    {
+        _activated = false;
+        AppWindow.Hide();
+    }
 
     private static Grid DetailRow(Symbol icon, TextBlock title, TextBlock value)
     {
@@ -123,6 +148,6 @@ internal sealed class DetailsWindow : Window
     {
         if (args.Key != VirtualKey.Escape) return;
         args.Handled = true;
-        Close();
+        Dismiss();
     }
 }

@@ -73,6 +73,7 @@ await using (var client = new HostClient(channel => prefix + "-" + channel))
     Check(stopping["stopping"]?.GetValue<bool>() == true, "graceful shutdown acknowledged before UI closes");
     await completed.Task.WaitAsync(token);
     Check(received.SequenceEqual(new[] { "¥1.00", "¥1.01", "¥2.00" }), "duplicate / backwards sequence rejected; new generation accepted");
+    Check(client.LatestSnapshot?.AmountText == "¥2.00", "latest snapshot stays available to a window created after the first frame");
     await Task.WhenAll(display, control);
 }
 Console.WriteLine("PASS: UI host client reads fragmented frames, subscribes, drops duplicate/backwards snapshots, accepts host restart, and correlates control replies.");

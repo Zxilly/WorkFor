@@ -11,6 +11,7 @@ public partial class App : Application
     private static readonly HashSet<Window> Windows = [];
     private readonly CancellationTokenSource _activationStop = new();
     private readonly DispatcherQueue _queue;
+    private int _watchedHost;
 
     public App()
     {
@@ -52,12 +53,18 @@ public partial class App : Application
     private static void ActivateArguments(string[] args)
     {
         if (args.Contains("--quit", StringComparer.OrdinalIgnoreCase)) { CloseAllWindows(); return; }
+        if (args.Contains("--warm", StringComparer.OrdinalIgnoreCase))
+        {
+            if (Current is App app) app.WatchHost(args);
+            if (!Windows.OfType<DetailsWindow>().Any()) Track(new DetailsWindow());
+            return;
+        }
         var settings = args.Contains("--settings", StringComparer.OrdinalIgnoreCase);
         var existing = Windows.FirstOrDefault(window => settings ? window is SettingsWindow : window is DetailsWindow);
         if (existing is not null)
         {
             if (existing is DetailsWindow details) details.MoveToAnchor(WindowLayout.ParseAnchor(args));
-            existing.Activate();
+            WindowLayout.Activate(existing);
             return;
         }
         Show(settings ? new SettingsWindow() : new DetailsWindow(WindowLayout.ParseAnchor(args)));
@@ -65,13 +72,18 @@ public partial class App : Application
 
     internal static void Show(Window window)
     {
+        Track(window);
+        WindowLayout.Activate(window);
+    }
+
+    private static void Track(Window window)
+    {
         Windows.Add(window);
         window.Closed += (_, _) =>
         {
             Windows.Remove(window);
             if (Windows.Count == 0 && Current is App app) app._activationStop.Cancel();
         };
-        window.Activate();
     }
 
     internal static void CloseAllWindows()
@@ -80,4 +92,23 @@ public partial class App : Application
     }
 
     internal static void OpenSettings() => ActivateArguments(["--settings"]);
+
+    private void WatchHost(string[] args)
+    {
+        var index = Array.IndexOf(args, "--host-pid");
+        if (index < 0 || index + 1 >= args.Length || !int.TryParse(args[index + 1], out var pid) || pid == _watchedHost) return;
+        _watchedHost = pid;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var host = System.Diagnostics.Process.GetProcessById(pid);
+                if (host.SessionId != System.Diagnostics.Process.GetCurrentProcess().SessionId || host.ProcessName != "WorkFor.Host") return;
+                await host.WaitForExitAsync(_activationStop.Token);
+                _queue.TryEnqueue(() => { if (_watchedHost == pid) CloseAllWindows(); });
+            }
+            catch (ArgumentException) { _queue.TryEnqueue(() => { if (_watchedHost == pid) CloseAllWindows(); }); }
+            catch (Exception error) when (error is OperationCanceledException or InvalidOperationException or System.ComponentModel.Win32Exception) { }
+        });
+    }
 }

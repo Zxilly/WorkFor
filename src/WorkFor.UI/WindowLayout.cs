@@ -23,6 +23,7 @@ internal static class WindowLayout
             presenter.IsMinimizable = !compact;
             if (compact)
             {
+                presenter.IsAlwaysOnTop = true;
                 presenter.SetBorderAndTitleBar(true, false);
                 appWindow.IsShownInSwitchers = false;
             }
@@ -35,7 +36,7 @@ internal static class WindowLayout
         var gap = (int)(8 * dpiScale);
         var right = display.WorkArea.X + display.WorkArea.Width;
         var bottom = display.WorkArea.Y + display.WorkArea.Height;
-        var x = anchor is { } position ? position.X + position.Width - size.Width : right - size.Width - gap;
+        var x = anchor is { } position ? position.X + (position.Width - size.Width) / 2 : right - size.Width - gap;
         var y = anchor is { } source ? source.Y - size.Height - gap : bottom - size.Height - gap;
         // A top-docked or small display still gets a visible panel inside its work area.
         appWindow.Move(new PointInt32(
@@ -79,6 +80,17 @@ internal static class WindowLayout
     {
         App.OpenSettings();
     }
+
+    public static void Activate(Window window)
+    {
+        window.AppWindow.Show();
+        window.Activate();
+        SetForegroundWindow(WinRT.Interop.WindowNative.GetWindowHandle(window));
+    }
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetForegroundWindow(IntPtr hwnd);
 
     [DllImport("user32.dll")]
     private static extern uint GetDpiForWindow(IntPtr hwnd);
